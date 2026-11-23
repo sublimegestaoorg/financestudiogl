@@ -1,9 +1,38 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { CreditCard, Pencil, Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
-import { useStore, summary, monthly, brl, pct, fdate, type Data, type Tx } from "@/lib/store";
+import {
+  addStaff,
+  addStockItem,
+  brl,
+  deleteStaff,
+  deleteStockItem,
+  deleteTransaction,
+  fdate,
+  getPaymentMethods,
+  monthly,
+  pct,
+  summary,
+  updateStaff,
+  updateStockItem,
+  updateTransaction,
+  useStore,
+  type Data,
+  type Item,
+  type Staff,
+  type Tx,
+} from "@/lib/store";
+import {
+  ConfirmDeleteDialog,
+  StaffDialog,
+  StockItemDialog,
+  TX_CATEGORIES,
+  TransactionEditDialog,
+} from "@/components/studio/dialogs";
+import { PaymentMethodsDialog, PaymentMethodsManager } from "@/components/studio/payment-methods";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -19,7 +48,7 @@ export const Route = createFileRoute("/")({
   component: App,
 });
 
-const TABS = ["Painel", "Fluxo de Caixa", "Estoque", "Equipe", "Pró-Labore", "Anual"] as const;
+const TABS = ["Painel", "Fluxo de Caixa", "Estoque", "Equipe", "Pró-Labore", "Formas de Pagamento", "Anual"] as const;
 type Tab = (typeof TABS)[number];
 type Props = { data: Data; setData: (f: (d: Data) => Data) => void };
 
@@ -123,6 +152,7 @@ function Studio({ userId }: { userId: string }) {
         {tab === "Estoque" && <Stock data={data} setData={setData} />}
         {tab === "Equipe" && <Team data={data} setData={setData} />}
         {tab === "Pró-Labore" && <ProLabore data={data} setData={setData} />}
+        {tab === "Formas de Pagamento" && <PaymentMethodsTab data={data} setData={setData} />}
         {tab === "Anual" && <Annual data={data} />}
         </>}
       </main>
@@ -154,8 +184,10 @@ function Bar({ value, max }: { value: number; max: number }) {
   return <div className="h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${max > 0 ? Math.min(100, (value / max) * 100) : 0}%` }} /></div>;
 }
 const input = "rounded-md border bg-background px-3 py-2 text-sm";
-const btn = "rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90";
-const del = (onClick: () => void) => <button onClick={onClick} className="text-destructive text-xs hover:underline">remover</button>;
+const btn = "inline-flex items-center justify-center gap-1.5 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 cursor-pointer";
+const secondaryBtn = "inline-flex items-center justify-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted cursor-pointer";
+const del = (onClick: () => void) => <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-destructive text-xs hover:underline cursor-pointer"><Trash2 className="h-3.5 w-3.5" />Excluir</button>;
+const editBtn = (onClick: () => void) => <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-primary text-xs hover:underline cursor-pointer"><Pencil className="h-3.5 w-3.5" />Editar</button>;
 
 function Dashboard({ data }: { data: Data }) {
   const s = summary(data);
@@ -183,19 +215,57 @@ function Dashboard({ data }: { data: Data }) {
   );
 }
 
-const CATS = ["Serviços", "Venda Produtos", "Insumos/Produtos", "Despesas Fixas", "Infraestrutura", "Marketing"];
 function Cash({ data, setData }: Props) {
-  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), type: "Entrada" as Tx["type"], category: "Serviços", description: "", amount: "", payment: "PIX" });
+  const paymentMethods = getPaymentMethods(data);
+  const [f, setF] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    type: "Entrada" as Tx["type"],
+    category: "Serviços",
+    description: "",
+    amount: "",
+    payment: paymentMethods[0] ?? "PIX",
+  });
   const [filter, setFilter] = useState("Todos");
-  const add = () => {
+  const [paymentFilter, setPaymentFilter] = useState("Todas");
+  const [editingTx, setEditingTx] = useState<Tx | null>(null);
+  const [deletingTx, setDeletingTx] = useState<Tx | null>(null);
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+
+  const effectivePayment = paymentMethods.includes(f.payment) ? f.payment : (paymentMethods[0] ?? "");
+  const filterPaymentOptions = Array.from(
+    new Set([...paymentMethods, ...data.transactions.map((t) => t.payment).filter(Boolean)]),
+  );
+  const activePaymentFilter =
+    paymentFilter === "Todas" || filterPaymentOptions.includes(paymentFilter) ? paymentFilter : "Todas";
+
+  const add = (e: FormEvent) => {
+    e.preventDefault();
     if (!f.description.trim()) { toast.error("Preencha a descrição do lançamento."); return; }
     if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
-    setData((d) => ({ ...d, transactions: [...d.transactions, { ...f, amount: Number(f.amount), id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`, status: "Concluído" }] }));
-    setF({ ...f, description: "", amount: "" });
+    if (!effectivePayment) { toast.error("Cadastre e selecione uma forma de pagamento."); return; }
+    setData((d) => ({
+      ...d,
+      transactions: [
+        ...d.transactions,
+        {
+          ...f,
+          description: f.description.trim(),
+          payment: effectivePayment,
+          amount: Number(f.amount),
+          id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`,
+          status: f.type === "Saída" ? "Pago" : "Concluído",
+        },
+      ],
+    }));
+    setF({ ...f, description: "", amount: "", payment: effectivePayment });
     toast.success("Lançamento registrado.");
   };
+
   const s = summary(data);
-  const list = [...data.transactions].filter((t) => filter === "Todos" || t.type === filter).sort((a, b) => b.date.localeCompare(a.date));
+  const list = [...data.transactions]
+    .filter((t) => (filter === "Todos" || t.type === filter) && (activePaymentFilter === "Todas" || t.payment === activePaymentFilter))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
   return (
     <>
       <Grid>
@@ -204,26 +274,102 @@ function Cash({ data, setData }: Props) {
         <Kpi label="Saldo" value={brl(s.profit)} />
         <Kpi label="Movimentações" value={String(data.transactions.length)} />
       </Grid>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <select className={input} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as Tx["type"] })}><option>Entrada</option><option>Saída</option></select>
-        <select className={input} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select>
+        <select className={input} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{TX_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
+        <select className={input} aria-label="Forma de pagamento" value={effectivePayment} onChange={(e) => setF({ ...f, payment: e.target.value })}>
+          {paymentMethods.length === 0 && <option value="">Cadastre uma forma...</option>}
+          {paymentMethods.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
         <input className={`${input} sm:col-span-2`} placeholder="Descrição" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
-        <input className={input} type="number" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        <button className={btn} onClick={add}>Lançar</button>
+        <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <button type="submit" className={btn}>Lançar</button>
+      </form>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {["Todos", "Entrada", "Saída"].map((x) => (
+            <button key={x} type="button" onClick={() => setFilter(x)} className={`rounded-full px-3 py-1 text-sm border cursor-pointer ${filter === x ? "bg-secondary font-medium" : ""}`}>{x}</button>
+          ))}
+          <select
+            aria-label="Filtrar por forma de pagamento"
+            className="rounded-full border bg-background px-3 py-1 text-sm"
+            value={activePaymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
+          >
+            <option value="Todas">Todas as formas</option>
+            {filterPaymentOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
+          <CreditCard className="h-4 w-4" />
+          Gerenciar formas de pagamento
+        </button>
       </div>
-      <div className="flex gap-2 mb-3">{["Todos", "Entrada", "Saída"].map((x) => <button key={x} onClick={() => setFilter(x)} className={`rounded-full px-3 py-1 text-sm border ${filter === x ? "bg-secondary font-medium" : ""}`}>{x}</button>)}</div>
-      <Table head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", ""]} rows={list.map((t) => [
-        fdate(t.date), <span className={t.type === "Entrada" ? "text-success" : "text-destructive"}>{t.type}</span>, t.category, t.description, brl(t.amount), t.payment,
-        del(() => setData((d) => ({ ...d, transactions: d.transactions.filter((x) => x.id !== t.id) }))),
-      ])} />
+      {list.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Nenhum lançamento encontrado para os filtros selecionados.
+        </div>
+      ) : (
+        <Table
+          head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Ações"]}
+          rows={list.map((t) => [
+            fdate(t.date),
+            <span className={t.type === "Entrada" ? "text-success" : "text-destructive"}>{t.type}</span>,
+            t.category,
+            t.description,
+            brl(t.amount),
+            t.payment,
+            <span className="inline-flex items-center gap-3">
+              {editBtn(() => setEditingTx(t))}
+              {del(() => setDeletingTx(t))}
+            </span>,
+          ])}
+        />
+      )}
+      <TransactionEditDialog
+        tx={editingTx}
+        open={Boolean(editingTx)}
+        onOpenChange={(open) => !open && setEditingTx(null)}
+        paymentMethods={paymentMethods}
+        onSave={(id, updated) => {
+          setData((d) => updateTransaction(d, id, updated));
+          toast.success("Lançamento atualizado.");
+        }}
+      />
+      <ConfirmDeleteDialog
+        open={Boolean(deletingTx)}
+        onOpenChange={(open) => !open && setDeletingTx(null)}
+        title="Excluir lançamento?"
+        description={deletingTx ? `Remover "${deletingTx.description}" (${brl(deletingTx.amount)}) do fluxo de caixa?` : ""}
+        onConfirm={() => {
+          if (!deletingTx) return;
+          setData((d) => deleteTransaction(d, deletingTx.id));
+          setDeletingTx(null);
+          toast.success("Lançamento excluído.");
+        }}
+      />
+      <PaymentMethodsDialog open={paymentsOpen} onOpenChange={setPaymentsOpen} data={data} setData={setData} />
     </>
   );
 }
 
 function Stock({ data, setData }: Props) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deletingItem, setDeletingItem] = useState<Item | null>(null);
   const upd = (code: string, qty: number) => setData((d) => ({ ...d, stock: d.stock.map((i) => (i.code === code ? { ...i, qty: Math.max(0, qty) } : i)) }));
   const s = summary(data);
+
+  const openNew = () => {
+    setEditingItem(null);
+    setDialogOpen(true);
+  };
+  const openEdit = (item: Item) => {
+    setEditingItem(item);
+    setDialogOpen(true);
+  };
+
   return (
     <>
       <Grid>
@@ -232,13 +378,68 @@ function Stock({ data, setData }: Props) {
         <Kpi label="Repor urgente" value={String(s.critical)} tone={s.critical ? "bad" : "good"} />
         <Kpi label="Custo médio unitário" value={brl(data.stock.reduce((a, i) => a + i.cost, 0) / (data.stock.length || 1))} />
       </Grid>
-      <Table head={["Item", "Categoria", "Mín.", "Atual", "Custo un.", "Total", "Status", "Comprar"]} rows={data.stock.map((i) => [
-        i.name, i.category, i.min,
-        <span className="inline-flex items-center gap-2"><button className="px-2 rounded border" onClick={() => upd(i.code, i.qty - 1)}>−</button>{i.qty}<button className="px-2 rounded border" onClick={() => upd(i.code, i.qty + 1)}>+</button></span>,
-        brl(i.cost), brl(i.qty * i.cost),
-        i.qty <= i.min ? <span className="text-destructive font-medium">Repor urgente</span> : <span className="text-success">Regular</span>,
-        Math.max(0, i.min * 2 - i.qty),
-      ])} />
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-2xl font-semibold">Itens do estoque</h3>
+        <button type="button" onClick={openNew} className={btn}>
+          <Plus className="h-4 w-4" />
+          Novo item
+        </button>
+      </div>
+      {data.stock.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Nenhum item no estoque. Clique em &quot;Novo item&quot; para cadastrar.
+        </div>
+      ) : (
+        <Table
+          head={["Código", "Item", "Categoria", "Mín.", "Atual", "Custo un.", "Total", "Status", "Comprar", "Ações"]}
+          rows={data.stock.map((i) => [
+            <span className="text-muted-foreground">{i.code}</span>,
+            i.name,
+            i.category,
+            i.min,
+            <span className="inline-flex items-center gap-2">
+              <button type="button" className="px-2 rounded border cursor-pointer" onClick={() => upd(i.code, i.qty - 1)}>−</button>
+              {i.qty}
+              <button type="button" className="px-2 rounded border cursor-pointer" onClick={() => upd(i.code, i.qty + 1)}>+</button>
+            </span>,
+            brl(i.cost),
+            brl(i.qty * i.cost),
+            i.qty <= i.min ? <span className="text-destructive font-medium">Repor urgente</span> : <span className="text-success">Regular</span>,
+            Math.max(0, i.min * 2 - i.qty),
+            <span className="inline-flex items-center gap-3">
+              {editBtn(() => openEdit(i))}
+              {del(() => setDeletingItem(i))}
+            </span>,
+          ])}
+        />
+      )}
+      <StockItemDialog
+        item={editingItem}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        existingStock={data.stock}
+        onSave={(originalCode, item) => {
+          if (originalCode) {
+            setData((d) => updateStockItem(d, originalCode, item));
+            toast.success("Item do estoque atualizado.");
+          } else {
+            setData((d) => addStockItem(d, item));
+            toast.success("Item adicionado ao estoque.");
+          }
+        }}
+      />
+      <ConfirmDeleteDialog
+        open={Boolean(deletingItem)}
+        onOpenChange={(open) => !open && setDeletingItem(null)}
+        title={`Excluir "${deletingItem?.name ?? ""}"?`}
+        description="Este item será removido permanentemente do estoque."
+        onConfirm={() => {
+          if (!deletingItem) return;
+          setData((d) => deleteStockItem(d, deletingItem.code));
+          setDeletingItem(null);
+          toast.success("Item excluído do estoque.");
+        }}
+      />
     </>
   );
 }
@@ -246,55 +447,172 @@ function Stock({ data, setData }: Props) {
 function Team({ data, setData }: Props) {
   const s = summary(data);
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
-  const add = () => {
-    const st = data.staff.find((x) => x.name === f.staff);
-    if (!st) { toast.error("Escolha a profissional."); return; }
+  const [staffDialogOpen, setStaffDialogOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<Staff | null>(null);
+  const [deletingMember, setDeletingMember] = useState<Staff | null>(null);
+
+  const selectedStaff = data.staff.some((x) => x.name === f.staff) ? f.staff : (data.staff[0]?.name ?? "");
+
+  const add = (e: FormEvent) => {
+    e.preventDefault();
+    const st = data.staff.find((x) => x.name === selectedStaff);
+    if (!st) { toast.error("Cadastre e escolha um funcionário."); return; }
     if (!f.service.trim()) { toast.error("Preencha o serviço realizado."); return; }
     if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
-    setData((d) => ({ ...d, services: [...d.services, { ...f, amount: Number(f.amount), rate: st.rate }] }));
-    setF({ ...f, client: "", service: "", amount: "" });
+    setData((d) => ({
+      ...d,
+      services: [
+        ...d.services,
+        {
+          date: f.date,
+          staff: st.name,
+          client: f.client.trim(),
+          service: f.service.trim(),
+          amount: Number(f.amount),
+          rate: st.rate,
+        },
+      ],
+    }));
+    setF({ ...f, staff: st.name, client: "", service: "", amount: "" });
     toast.success("Atendimento registrado.");
   };
+
+  const deletingServiceCount = deletingMember
+    ? data.services.filter((v) => v.staff === deletingMember.name).length
+    : 0;
+
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2 mb-8">
-        {s.team.map((t) => (
-          <div key={t.name} className="rounded-xl border bg-card p-5">
-            <h3 className="text-2xl font-semibold">{t.name}</h3>
-            <p className="text-sm text-muted-foreground mb-3">{t.role} · comissão {pct(t.rate)}</p>
-            <dl className="grid grid-cols-2 gap-y-1 text-sm">
-              <dt>Salário base</dt><dd className="text-right">{brl(t.salary)}</dd>
-              <dt>Serviços realizados</dt><dd className="text-right">{brl(t.billed)}</dd>
-              <dt>Comissão devida</dt><dd className="text-right">{brl(t.commission)}</dd>
-              <dt>Adiantamentos</dt><dd className="text-right">− {brl(t.advance)}</dd>
-              <dt className="font-semibold pt-2 border-t">Líquido a pagar</dt><dd className="text-right font-semibold text-primary pt-2 border-t">{brl(t.net)}</dd>
-            </dl>
-          </div>
-        ))}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-2xl font-semibold">Profissionais</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setEditingMember(null);
+            setStaffDialogOpen(true);
+          }}
+          className={btn}
+        >
+          <Plus className="h-4 w-4" />
+          Novo funcionário
+        </button>
       </div>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {s.team.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground mb-8">
+          Nenhum funcionário cadastrado. Clique em &quot;Novo funcionário&quot; para adicionar à equipe.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 mb-8">
+          {s.team.map((t) => (
+            <div key={t.name} className="rounded-xl border bg-card p-5">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div>
+                  <h3 className="text-2xl font-semibold">{t.name}</h3>
+                  <p className="text-sm text-muted-foreground">{t.role} · comissão {pct(t.rate)}</p>
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  {editBtn(() => {
+                    setEditingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance });
+                    setStaffDialogOpen(true);
+                  })}
+                  {del(() =>
+                    setDeletingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance }),
+                  )}
+                </div>
+              </div>
+              <dl className="grid grid-cols-2 gap-y-1 text-sm">
+                <dt>Salário base</dt><dd className="text-right">{brl(t.salary)}</dd>
+                <dt>Serviços realizados</dt><dd className="text-right">{brl(t.billed)}</dd>
+                <dt>Comissão devida</dt><dd className="text-right">{brl(t.commission)}</dd>
+                <dt>Adiantamentos</dt><dd className="text-right">− {brl(t.advance)}</dd>
+                <dt className="font-semibold pt-2 border-t">Líquido a pagar</dt><dd className="text-right font-semibold text-primary pt-2 border-t">{brl(t.net)}</dd>
+              </dl>
+            </div>
+          ))}
+        </div>
+      )}
+      <h3 className="text-2xl font-semibold mb-3">Atendimentos e comissões</h3>
+      <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-        <select className={input} value={f.staff} onChange={(e) => setF({ ...f, staff: e.target.value })}>{data.staff.map((x) => <option key={x.name}>{x.name}</option>)}</select>
+        <select className={input} value={selectedStaff} onChange={(e) => setF({ ...f, staff: e.target.value })}>
+          {data.staff.length === 0 && <option value="">Cadastre um funcionário</option>}
+          {data.staff.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+        </select>
         <input className={input} placeholder="Cliente" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
         <input className={input} placeholder="Serviço" value={f.service} onChange={(e) => setF({ ...f, service: e.target.value })} />
-        <input className={input} type="number" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        <button className={btn} onClick={add}>Registrar</button>
-      </div>
+        <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <button type="submit" className={btn}>Registrar</button>
+      </form>
       <Table head={["Data", "Profissional", "Cliente", "Serviço", "Valor", "Comissão", ""]} rows={data.services.map((v, i) => [
         fdate(v.date), v.staff, v.client, v.service, brl(v.amount), brl(v.amount * v.rate),
         del(() => setData((d) => ({ ...d, services: d.services.filter((_, j) => j !== i) }))),
       ])} />
+      <StaffDialog
+        member={editingMember}
+        open={staffDialogOpen}
+        onOpenChange={setStaffDialogOpen}
+        existingStaff={data.staff}
+        onSave={(originalName, member) => {
+          if (originalName) {
+            setData((d) => updateStaff(d, originalName, member));
+            if (f.staff === originalName) setF((prev) => ({ ...prev, staff: member.name }));
+            toast.success("Funcionário atualizado.");
+          } else {
+            setData((d) => addStaff(d, member));
+            if (!f.staff) setF((prev) => ({ ...prev, staff: member.name }));
+            toast.success("Funcionário adicionado.");
+          }
+        }}
+      />
+      <ConfirmDeleteDialog
+        open={Boolean(deletingMember)}
+        onOpenChange={(open) => !open && setDeletingMember(null)}
+        title={`Excluir "${deletingMember?.name ?? ""}"?`}
+        description={
+          deletingServiceCount > 0
+            ? `Este funcionário possui ${deletingServiceCount} atendimento(s) registrado(s). Os atendimentos serão mantidos no histórico, mas o funcionário sairá da folha.`
+            : "O funcionário será removido permanentemente da equipe."
+        }
+        onConfirm={() => {
+          if (!deletingMember) return;
+          setData((d) => deleteStaff(d, deletingMember.name));
+          setDeletingMember(null);
+          toast.success("Funcionário excluído.");
+        }}
+      />
     </>
   );
 }
 
 function ProLabore({ data, setData }: Props) {
   const s = summary(data);
-  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", payment: "PIX Transferência" });
-  const add = () => {
+  const paymentMethods = getPaymentMethods(data);
+  const defaultPayment = paymentMethods.includes("PIX Transferência")
+    ? "PIX Transferência"
+    : (paymentMethods[0] ?? "");
+  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", payment: defaultPayment });
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+
+  const effectivePayment = paymentMethods.includes(f.payment) ? f.payment : defaultPayment;
+
+  const add = (e: FormEvent) => {
+    e.preventDefault();
     if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
-    setData((d) => ({ ...d, withdrawals: [...d.withdrawals, { ...f, description: f.description || "Retirada de pró-labore", amount: Number(f.amount), id: `PL-${Date.now()}` }] }));
-    setF({ ...f, description: "", amount: "" });
+    if (!effectivePayment) { toast.error("Cadastre e selecione uma forma de pagamento."); return; }
+    setData((d) => ({
+      ...d,
+      withdrawals: [
+        ...d.withdrawals,
+        {
+          date: f.date,
+          description: f.description.trim() || "Retirada de pró-labore",
+          amount: Number(f.amount),
+          payment: effectivePayment,
+          id: `PL-${Date.now()}`,
+        },
+      ],
+    }));
+    setF({ ...f, description: "", amount: "", payment: effectivePayment });
     toast.success("Retirada registrada.");
   };
   const over = s.withdrawn > s.ceiling;
@@ -306,16 +624,50 @@ function ProLabore({ data, setData }: Props) {
         <Kpi label="Retirado no mês" value={brl(s.withdrawn)} tone={over ? "bad" : "good"} hint={over ? "Acima do teto seguro" : "Retirada saudável"} />
         <Kpi label="Disponível no teto" value={brl(s.ceiling - s.withdrawn)} hint={`Reserva do estúdio: ${brl(s.profit * (1 - data.safeRate))}`} />
       </Grid>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-        <input className={`${input} sm:col-span-2`} placeholder="Finalidade" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
-        <input className={input} type="number" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        <button className={btn} onClick={add}>Registrar retirada</button>
+        <input className={input} placeholder="Finalidade" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+        <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <select className={input} aria-label="Forma de pagamento" value={effectivePayment} onChange={(e) => setF({ ...f, payment: e.target.value })}>
+          {paymentMethods.length === 0 && <option value="">Cadastre uma forma...</option>}
+          {paymentMethods.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button type="submit" className={btn}>Registrar retirada</button>
+      </form>
+      <div className="flex justify-end mb-3">
+        <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
+          <CreditCard className="h-4 w-4" />
+          Gerenciar formas de pagamento
+        </button>
       </div>
       <Table head={["Data", "Finalidade", "Valor", "Pagamento", ""]} rows={data.withdrawals.map((w) => [
         fdate(w.date), w.description, brl(w.amount), w.payment,
         del(() => setData((d) => ({ ...d, withdrawals: d.withdrawals.filter((x) => x.id !== w.id) }))),
       ])} />
+      <PaymentMethodsDialog open={paymentsOpen} onOpenChange={setPaymentsOpen} data={data} setData={setData} />
+    </>
+  );
+}
+
+function PaymentMethodsTab({ data, setData }: Props) {
+  const methods = getPaymentMethods(data);
+  const s = summary(data);
+  const counts = methods.map((m) => ({
+    name: m,
+    count:
+      data.transactions.filter((t) => t.payment === m).length +
+      data.withdrawals.filter((w) => w.payment === m).length,
+  }));
+  const top = [...counts].sort((a, b) => b.count - a.count)[0];
+  return (
+    <>
+      <Grid>
+        <Kpi label="Formas cadastradas" value={String(methods.length)} />
+        <Kpi label="Mais utilizada" value={top && top.count > 0 ? top.name : "—"} hint={top && top.count > 0 ? `${top.count} lançamentos` : "Sem registros ainda"} />
+        <Kpi label="Total em entradas" value={brl(s.revenue)} tone="good" />
+        <Kpi label="Total em saídas" value={brl(s.expenses + s.withdrawn)} tone="bad" hint="Despesas + pró-labore" />
+      </Grid>
+      <PaymentMethodsManager data={data} setData={setData} showStats />
     </>
   );
 }
