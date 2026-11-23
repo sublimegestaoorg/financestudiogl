@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -70,7 +71,11 @@ export function ConfirmDeleteDialog({
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={onConfirm}
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+              onOpenChange(false);
+            }}
           >
             Excluir
           </AlertDialogAction>
@@ -271,12 +276,14 @@ export function StockItemDialog({
   onOpenChange,
   existingStock,
   onSave,
+  onDelete,
 }: {
   item: Item | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   existingStock: Item[];
   onSave: (originalCode: string | null, item: Item) => void;
+  onDelete?: (item: Item) => void;
 }) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -445,13 +452,30 @@ export function StockItemDialog({
               />
             </div>
           </div>
-          <DialogFooter className="gap-2">
-            <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
-              Cancelar
-            </button>
-            <button type="submit" className={primaryBtn}>
-              {item ? "Salvar alterações" : "Adicionar item"}
-            </button>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {item && onDelete ? (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 cursor-pointer"
+                onClick={() => {
+                  onOpenChange(false);
+                  onDelete(item);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir item
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex flex-col-reverse sm:flex-row gap-2">
+              <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className={primaryBtn}>
+                {item ? "Salvar alterações" : "Adicionar item"}
+              </button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>
