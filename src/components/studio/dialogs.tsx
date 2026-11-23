@@ -28,6 +28,8 @@ export const TX_CATEGORIES = [
   "Despesas Fixas",
   "Infraestrutura",
   "Marketing",
+  "Comissão",
+  "Pró-Labore",
 ];
 
 export const TX_STATUSES = ["Concluído", "Pago", "Pendente", "Cancelado"];
