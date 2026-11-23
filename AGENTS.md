@@ -28,3 +28,5 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+- Each signed-in user's whole studio dataset is one JSON row in `studio_data` (RLS by user_id), loaded and debounce-saved by `useStore` — keeps the spreadsheet-shaped model simple.
