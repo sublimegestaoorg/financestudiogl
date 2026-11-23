@@ -83,12 +83,12 @@ function Studio({ userId }: { userId: string }) {
   const [tab, setTab] = useState<Tab>("Painel");
   return (
     <div className="min-h-screen md:flex">
-      <aside className="bg-sidebar text-sidebar-foreground md:w-60 md:min-h-screen p-5 flex md:flex-col gap-4">
+      <aside className="bg-sidebar text-sidebar-foreground md:w-60 md:min-h-screen p-5 flex flex-wrap items-start md:flex-nowrap md:flex-col gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-sidebar-primary">Estúdio</p>
           <h1 className="text-3xl font-semibold leading-none">Geisa Lorena</h1>
         </div>
-        <nav className="flex md:flex-col gap-1 overflow-x-auto md:mt-6">
+        <nav className="order-last md:order-none w-full flex md:flex-col gap-1 overflow-x-auto md:mt-6">
           {TABS.map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`text-left whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${tab === t ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium" : "hover:bg-sidebar-accent"}`}>
