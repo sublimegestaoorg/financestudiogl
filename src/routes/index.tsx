@@ -53,7 +53,7 @@ function App() {
   );
 }
 
-function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" }) {
+function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | undefined }) {
   return (
     <div className="rounded-xl border bg-card p-5">
       <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
