@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { toast } from "sonner";
 import { useStore, summary, monthly, brl, pct, fdate, type Data, type Tx } from "@/lib/store";
 
 export const Route = createFileRoute("/")({
@@ -101,7 +102,7 @@ function Studio({ userId }: { userId: string }) {
         </div>
         <button onClick={() => supabase.auth.signOut()} className="md:hidden ml-auto text-xs whitespace-nowrap">Sair</button>
       </aside>
-      <main className="flex-1 p-5 md:p-10 max-w-6xl">
+      <main className="flex-1 min-w-0 p-5 md:p-10 max-w-6xl">
         <h2 className="text-4xl font-semibold mb-6">{tab}</h2>
         {!ready && <p className="text-muted-foreground">Carregando seus dados…</p>}
         {ready && <>
@@ -175,9 +176,11 @@ function Cash({ data, setData }: Props) {
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), type: "Entrada" as Tx["type"], category: "Serviços", description: "", amount: "", payment: "PIX" });
   const [filter, setFilter] = useState("Todos");
   const add = () => {
-    if (!f.description || !Number(f.amount)) return;
+    if (!f.description.trim()) { toast.error("Preencha a descrição do lançamento."); return; }
+    if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
     setData((d) => ({ ...d, transactions: [...d.transactions, { ...f, amount: Number(f.amount), id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`, status: "Concluído" }] }));
     setF({ ...f, description: "", amount: "" });
+    toast.success("Lançamento registrado.");
   };
   const s = summary(data);
   const list = [...data.transactions].filter((t) => filter === "Todos" || t.type === filter).sort((a, b) => b.date.localeCompare(a.date));
@@ -189,11 +192,11 @@ function Cash({ data, setData }: Props) {
         <Kpi label="Saldo" value={brl(s.profit)} />
         <Kpi label="Movimentações" value={String(data.transactions.length)} />
       </Grid>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 md:grid-cols-7">
+      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <select className={input} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as Tx["type"] })}><option>Entrada</option><option>Saída</option></select>
         <select className={input} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select>
-        <input className={`${input} md:col-span-2`} placeholder="Descrição" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+        <input className={`${input} sm:col-span-2`} placeholder="Descrição" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         <input className={input} type="number" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <button className={btn} onClick={add}>Lançar</button>
       </div>
@@ -233,9 +236,12 @@ function Team({ data, setData }: Props) {
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
   const add = () => {
     const st = data.staff.find((x) => x.name === f.staff);
-    if (!st || !f.service || !Number(f.amount)) return;
+    if (!st) { toast.error("Escolha a profissional."); return; }
+    if (!f.service.trim()) { toast.error("Preencha o serviço realizado."); return; }
+    if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
     setData((d) => ({ ...d, services: [...d.services, { ...f, amount: Number(f.amount), rate: st.rate }] }));
     setF({ ...f, client: "", service: "", amount: "" });
+    toast.success("Atendimento registrado.");
   };
   return (
     <>
@@ -254,7 +260,7 @@ function Team({ data, setData }: Props) {
           </div>
         ))}
       </div>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 md:grid-cols-6">
+      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <select className={input} value={f.staff} onChange={(e) => setF({ ...f, staff: e.target.value })}>{data.staff.map((x) => <option key={x.name}>{x.name}</option>)}</select>
         <input className={input} placeholder="Cliente" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
@@ -274,9 +280,10 @@ function ProLabore({ data, setData }: Props) {
   const s = summary(data);
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", payment: "PIX Transferência" });
   const add = () => {
-    if (!Number(f.amount)) return;
+    if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
     setData((d) => ({ ...d, withdrawals: [...d.withdrawals, { ...f, description: f.description || "Retirada de pró-labore", amount: Number(f.amount), id: `PL-${Date.now()}` }] }));
     setF({ ...f, description: "", amount: "" });
+    toast.success("Retirada registrada.");
   };
   const over = s.withdrawn > s.ceiling;
   return (
@@ -287,9 +294,9 @@ function ProLabore({ data, setData }: Props) {
         <Kpi label="Retirado no mês" value={brl(s.withdrawn)} tone={over ? "bad" : "good"} hint={over ? "Acima do teto seguro" : "Retirada saudável"} />
         <Kpi label="Disponível no teto" value={brl(s.ceiling - s.withdrawn)} hint={`Reserva do estúdio: ${brl(s.profit * (1 - data.safeRate))}`} />
       </Grid>
-      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 md:grid-cols-5">
+      <div className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-        <input className={`${input} md:col-span-2`} placeholder="Finalidade" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+        <input className={`${input} sm:col-span-2`} placeholder="Finalidade" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         <input className={input} type="number" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <button className={btn} onClick={add}>Registrar retirada</button>
       </div>
