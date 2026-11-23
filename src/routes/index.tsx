@@ -35,6 +35,18 @@ function App() {
   return <Studio key={userId} userId={userId} />;
 }
 
+function authError(m: string) {
+  const t = m.toLowerCase();
+  if (t.includes("invalid login credentials")) return "E-mail ou senha incorretos.";
+  if (t.includes("email not confirmed")) return "Confirme seu e-mail pelo link que enviamos antes de entrar.";
+  if (t.includes("already registered") || t.includes("already been registered")) return "Este e-mail já tem conta. Use \"Entrar\".";
+  if (t.includes("not allowed") || t.includes("invalid")) return "Este e-mail não é válido. Confira se digitou certo.";
+  if (t.includes("password") && (t.includes("weak") || t.includes("pwned") || t.includes("known"))) return "Senha fraca ou muito conhecida. Escolha outra.";
+  if (t.includes("password")) return "A senha precisa ter pelo menos 6 caracteres.";
+  if (t.includes("rate limit") || t.includes("too many")) return "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
+  return "Não foi possível concluir. Tente novamente.";
+}
+
 function Login() {
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
@@ -47,7 +59,7 @@ function Login() {
       ? await supabase.auth.signInWithPassword({ email, password })
       : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
     setBusy(false);
-    if (error) return setMsg(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message);
+    if (error) return setMsg(authError(error.message));
     if (mode === "up" && !data.session) setMsg("Conta criada! Confira seu e-mail para confirmar o cadastro.");
   }
   async function google() {
