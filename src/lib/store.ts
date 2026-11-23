@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import seed from "@/data/seed.json";
+import { supabase } from "@/integrations/supabase/client";
 
 export type Tx = { id: string; date: string; type: "Entrada" | "Saída"; category: string; description: string; amount: number; payment: string; status: string };
 export type Item = { code: string; name: string; category: string; min: number; qty: number; cost: number };
@@ -19,16 +20,35 @@ const initial: Data = {
 
 const KEY = "geisa-lorena-financas-v1";
 
-export function useStore() {
+export function useStore(userId: string) {
   const [data, setData] = useState<Data>(initial);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    const raw = localStorage.getItem(KEY);
-    if (raw) try { setData(JSON.parse(raw)); } catch { /* ignore */ }
-    setReady(true);
-  }, []);
-  useEffect(() => { if (ready) localStorage.setItem(KEY, JSON.stringify(data)); }, [data, ready]);
-  return { data, setData, reset: () => setData(initial) };
+    let alive = true;
+    (async () => {
+      const { data: row } = await supabase.from("studio_data").select("data").eq("user_id", userId).maybeSingle();
+      if (!alive) return;
+      if (row?.data) setData(row.data as unknown as Data);
+      else {
+        // first login: bring over anything saved on this device
+        let start = initial;
+        const raw = localStorage.getItem(KEY);
+        if (raw) try { start = JSON.parse(raw); } catch { /* ignore */ }
+        setData(start);
+        await supabase.from("studio_data").insert({ user_id: userId, data: start as never });
+      }
+      setReady(true);
+    })();
+    return () => { alive = false; };
+  }, [userId]);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => {
+      supabase.from("studio_data").upsert({ user_id: userId, data: data as never, updated_at: new Date().toISOString() }).then(({ error }) => { if (error) console.error(error); });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [data, ready, userId]);
+  return { data, setData, ready, reset: () => setData(initial) };
 }
 
 export const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
