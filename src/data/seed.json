@@ -1,0 +1,521 @@
+{
+ "transactions": [
+  {
+   "id": "TR-001",
+   "date": "2026-11-03",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Mechas e Corte Long Bob - Juliana Mendes",
+   "amount": 480.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-002",
+   "date": "2026-11-03",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Alongamento Fibra de Vidro - Beatriz Lima",
+   "amount": 220.0,
+   "payment": "Cartão Crédito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-003",
+   "date": "2026-11-04",
+   "type": "Saída",
+   "category": "Insumos/Produtos",
+   "description": "Compra Tinturas e Ox Wella - Distribuidora",
+   "amount": 650.0,
+   "payment": "PIX",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-004",
+   "date": "2026-11-05",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Escova Modelada e Tratamento Kérastase - Patrícia",
+   "amount": 280.0,
+   "payment": "Cartão Débito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-005",
+   "date": "2026-11-06",
+   "type": "Entrada",
+   "category": "Venda Produtos",
+   "description": "Kit Home Care Shampoo + Máscara Nutrição",
+   "amount": 240.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-006",
+   "date": "2026-11-07",
+   "type": "Saída",
+   "category": "Despesas Fixas",
+   "description": "Conta de Energia Elétrica - Estúdio Geisa Lorena",
+   "amount": 420.0,
+   "payment": "Boleto",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-007",
+   "date": "2026-11-08",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Coloração Global + Escova - Camila Albuquerque",
+   "amount": 350.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-008",
+   "date": "2026-11-09",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Esmaltação em Gel e Cutilagem Russa - Marina R.",
+   "amount": 130.0,
+   "payment": "Cartão Crédito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-009",
+   "date": "2026-11-10",
+   "type": "Saída",
+   "category": "Insumos/Produtos",
+   "description": "Reposição Esmaltes Gel e Brocas Diamantadas",
+   "amount": 380.0,
+   "payment": "Cartão Crédito",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-010",
+   "date": "2026-11-11",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Morena Iluminada e Glossing - Vanessa Guimarães",
+   "amount": 550.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-011",
+   "date": "2026-11-12",
+   "type": "Entrada",
+   "category": "Venda Produtos",
+   "description": "Óleo Finalizador e Leave-in Protetor Térmico",
+   "amount": 190.0,
+   "payment": "Dinheiro",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-012",
+   "date": "2026-11-13",
+   "type": "Saída",
+   "category": "Marketing",
+   "description": "Tráfego Pago Instagram Ads & Conteúdo Local",
+   "amount": 300.0,
+   "payment": "Cartão Crédito",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-013",
+   "date": "2026-11-14",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Spa dos Pés + Manicure Tradicional - Fernanda S.",
+   "amount": 110.0,
+   "payment": "Cartão Débito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-014",
+   "date": "2026-11-15",
+   "type": "Saída",
+   "category": "Despesas Fixas",
+   "description": "Internet Fibra Óptica e Telefonia Estúdio",
+   "amount": 160.0,
+   "payment": "Boleto",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-015",
+   "date": "2026-11-16",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Terapia Capilar e Cronograma Reconstrutor",
+   "amount": 320.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-016",
+   "date": "2026-11-17",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Manutenção Alongamento em Gel - Sofia Ferreira",
+   "amount": 140.0,
+   "payment": "Cartão Crédito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-017",
+   "date": "2026-11-18",
+   "type": "Saída",
+   "category": "Insumos/Produtos",
+   "description": "Luvas Nitrílicas, Toalhas Descartáveis e Algodão",
+   "amount": 210.0,
+   "payment": "PIX",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-018",
+   "date": "2026-11-19",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Pacote Penteado e Maquiagem Festa - Débora M.",
+   "amount": 620.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-019",
+   "date": "2026-11-20",
+   "type": "Entrada",
+   "category": "Venda Produtos",
+   "description": "Sérum Reparador Pontas e Ampola Reconstrução",
+   "amount": 160.0,
+   "payment": "Cartão Débito",
+   "status": "Concluído"
+  },
+  {
+   "id": "TR-020",
+   "date": "2026-11-21",
+   "type": "Saída",
+   "category": "Infraestrutura",
+   "description": "Manutenção Autoclave e Afiação de Alicates",
+   "amount": 190.0,
+   "payment": "PIX",
+   "status": "Pago"
+  },
+  {
+   "id": "TR-021",
+   "date": "2026-11-22",
+   "type": "Entrada",
+   "category": "Serviços",
+   "description": "Selagem Térmica Orgânica - Mariana Ribeiro",
+   "amount": 390.0,
+   "payment": "PIX",
+   "status": "Concluído"
+  }
+ ],
+ "stock": [
+  {
+   "code": "EST-001",
+   "name": "Coloração Wella Illumina Color 60g",
+   "category": "Colorimetria",
+   "min": 8.0,
+   "qty": 4.0,
+   "cost": 42.0
+  },
+  {
+   "code": "EST-002",
+   "name": "Pó Descolorante Blondor Multi Blonde 800g",
+   "category": "Colorimetria",
+   "min": 4.0,
+   "qty": 2.0,
+   "cost": 165.0
+  },
+  {
+   "code": "EST-003",
+   "name": "Água Oxigenada Wella Welloxon 20 Vol 1L",
+   "category": "Colorimetria",
+   "min": 5.0,
+   "qty": 6.0,
+   "cost": 68.0
+  },
+  {
+   "code": "EST-004",
+   "name": "Água Oxigenada Wella Welloxon 30 Vol 1L",
+   "category": "Colorimetria",
+   "min": 5.0,
+   "qty": 3.0,
+   "cost": 68.0
+  },
+  {
+   "code": "EST-005",
+   "name": "Máscara Kérastase Nutritive 500g",
+   "category": "Tratamento Capilar",
+   "min": 3.0,
+   "qty": 4.0,
+   "cost": 290.0
+  },
+  {
+   "code": "EST-006",
+   "name": "Shampoo Kérastase Bain Satin 1000ml",
+   "category": "Tratamento Capilar",
+   "min": 3.0,
+   "qty": 2.0,
+   "cost": 260.0
+  },
+  {
+   "code": "EST-007",
+   "name": "Gel Construtor Vòlia Classic Nude 24g",
+   "category": "Nail Care",
+   "min": 10.0,
+   "qty": 12.0,
+   "cost": 64.0
+  },
+  {
+   "code": "EST-008",
+   "name": "Top Coat Brilho Extremo Vòlia 10ml",
+   "category": "Nail Care",
+   "min": 6.0,
+   "qty": 5.0,
+   "cost": 39.0
+  },
+  {
+   "code": "EST-009",
+   "name": "Kit Esmaltes em Gel D&Z (Coleção Cores)",
+   "category": "Nail Care",
+   "min": 12.0,
+   "qty": 8.0,
+   "cost": 28.0
+  },
+  {
+   "code": "EST-010",
+   "name": "Prep Bactericida Higienizador Unhas 500ml",
+   "category": "Nail Care",
+   "min": 4.0,
+   "qty": 5.0,
+   "cost": 32.0
+  },
+  {
+   "code": "EST-011",
+   "name": "Luvas Nitrílicas Pretas Tam M (Cx 100 un)",
+   "category": "Descartáveis",
+   "min": 5.0,
+   "qty": 3.0,
+   "cost": 48.0
+  },
+  {
+   "code": "EST-012",
+   "name": "Toalhas Descartáveis Gramatura Alta (Pct 100)",
+   "category": "Descartáveis",
+   "min": 4.0,
+   "qty": 6.0,
+   "cost": 55.0
+  },
+  {
+   "code": "EST-013",
+   "name": "Capas de Corte Descartáveis Transparentes",
+   "category": "Descartáveis",
+   "min": 3.0,
+   "qty": 2.0,
+   "cost": 35.0
+  },
+  {
+   "code": "EST-014",
+   "name": "Envelopes Grau Cirúrgico Autoclave (Pct 200)",
+   "category": "Descartáveis",
+   "min": 3.0,
+   "qty": 4.0,
+   "cost": 45.0
+  },
+  {
+   "code": "EST-015",
+   "name": "Kit Home Care Kérastase Nutrição (Revenda)",
+   "category": "Home Care",
+   "min": 4.0,
+   "qty": 5.0,
+   "cost": 160.0
+  },
+  {
+   "code": "EST-016",
+   "name": "Óleo Reparador Dark Oil Sebastian (Revenda)",
+   "category": "Home Care",
+   "min": 5.0,
+   "qty": 3.0,
+   "cost": 120.0
+  },
+  {
+   "code": "EST-017",
+   "name": "Sérum Reconstrutor Noturno Kérastase (Revenda)",
+   "category": "Home Care",
+   "min": 4.0,
+   "qty": 4.0,
+   "cost": 145.0
+  },
+  {
+   "code": "EST-018",
+   "name": "Lixas Boomerang e Polidoras (Pct 50 un)",
+   "category": "Nail Care",
+   "min": 6.0,
+   "qty": 8.0,
+   "cost": 22.0
+  }
+ ],
+ "services": [
+  {
+   "date": "2026-11-03",
+   "staff": "Camila Silva",
+   "client": "Juliana Mendes",
+   "service": "Mechas Criativas e Tratamento",
+   "amount": 480.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-03",
+   "staff": "Larissa Santos",
+   "client": "Beatriz Lima",
+   "service": "Alongamento em Fibra de Vidro",
+   "amount": 220.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-05",
+   "staff": "Camila Silva",
+   "client": "Patrícia Souza",
+   "service": "Escova Modelada e Kérastase",
+   "amount": 280.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-08",
+   "staff": "Camila Silva",
+   "client": "Camila Albuquerque",
+   "service": "Coloração Global e Reconstrução",
+   "amount": 350.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-09",
+   "staff": "Larissa Santos",
+   "client": "Marina Rocha",
+   "service": "Esmaltação em Gel e Cutilagem",
+   "amount": 130.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-11",
+   "staff": "Camila Silva",
+   "client": "Vanessa Guimarães",
+   "service": "Morena Iluminada e Nutrição",
+   "amount": 550.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-14",
+   "staff": "Larissa Santos",
+   "client": "Fernanda Silveira",
+   "service": "Spa dos Pés e Manicure Spa",
+   "amount": 110.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-16",
+   "staff": "Camila Silva",
+   "client": "Renata Duarte",
+   "service": "Cronograma Capilar Intenso",
+   "amount": 320.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-17",
+   "staff": "Larissa Santos",
+   "client": "Sofia Ferreira",
+   "service": "Manutenção Alongamento Gel",
+   "amount": 140.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-19",
+   "staff": "Camila Silva",
+   "client": "Débora Moraes",
+   "service": "Penteado Noiva / Madrinha",
+   "amount": 380.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-19",
+   "staff": "Larissa Santos",
+   "client": "Débora Moraes",
+   "service": "Maquiagem e Spa das Mãos",
+   "amount": 240.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-22",
+   "staff": "Camila Silva",
+   "client": "Mariana Ribeiro",
+   "service": "Selagem Térmica Orgânica",
+   "amount": 390.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-22",
+   "staff": "Larissa Santos",
+   "client": "Juliana Mendes",
+   "service": "Blindagem de Unhas e Arte",
+   "amount": 120.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-24",
+   "staff": "Larissa Santos",
+   "client": "Carla Peixoto",
+   "service": "Alongamento Polygel Decorado",
+   "amount": 210.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-25",
+   "staff": "Camila Silva",
+   "client": "Amanda Costa",
+   "service": "Retoque de Raiz e Glossing",
+   "amount": 260.0,
+   "rate": 0.25
+  },
+  {
+   "date": "2026-11-26",
+   "staff": "Larissa Santos",
+   "client": "Tatiane Ramos",
+   "service": "Manicure e Pedicure Completa",
+   "amount": 95.0,
+   "rate": 0.3
+  },
+  {
+   "date": "2026-11-27",
+   "staff": "Camila Silva",
+   "client": "Helena Vasconcelos",
+   "service": "Iluminação Sutil e Corte Bob",
+   "amount": 420.0,
+   "rate": 0.25
+  }
+ ],
+ "withdrawals": [
+  {
+   "id": "PL-001",
+   "date": "2026-11-05",
+   "description": "Pró-Labore Quinzenal (1ª Parcela)",
+   "amount": 350.0,
+   "payment": "PIX Transferência"
+  },
+  {
+   "id": "PL-002",
+   "date": "2026-11-12",
+   "description": "Adiantamento Pró-Labore Pessoal",
+   "amount": 150.0,
+   "payment": "PIX Transferência"
+  },
+  {
+   "id": "PL-003",
+   "date": "2026-11-20",
+   "description": "Pró-Labore Quinzenal (2ª Parcela)",
+   "amount": 350.0,
+   "payment": "PIX Transferência"
+  }
+ ]
+}
