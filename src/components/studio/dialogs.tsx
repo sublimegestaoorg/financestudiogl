@@ -33,6 +33,9 @@ export const TX_CATEGORIES = [
   "Marketing",
   "Comissão",
   "Pró-Labore",
+  "Alimentação",
+  "Transporte",
+  "Investimento",
 ];
 
 export const TX_STATUSES = ["Concluído", "Pago", "Pendente", "Cancelado"];
