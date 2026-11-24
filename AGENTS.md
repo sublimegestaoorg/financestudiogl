@@ -30,3 +30,4 @@ use the editor.
 <!-- LOVABLE:END -->
 
 - Each signed-in user's whole studio dataset is one JSON row in `studio_data` (RLS by user_id), loaded and debounce-saved by `useStore` — keeps the spreadsheet-shaped model simple.
+- Installment tracking is optional metadata on a transaction, shared by its create/edit forms; it does not generate future transactions or multiply cash totals, so existing financial calculations remain unchanged.

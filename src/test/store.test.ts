@@ -10,6 +10,7 @@ import {
   deleteTransaction,
   filterTransactions,
   getPaymentMethods,
+  installmentDetails,
   nextStockCode,
   normalizeData,
   summary,
@@ -31,6 +32,34 @@ const base: Data = {
 };
 
 describe("regras financeiras", () => {
+  it("registra 6 meses restantes em uma conta a pagar sem multiplicar a despesa", () => {
+    const transaction = { id: "parcelada", date: "2026-11-24", type: "Saída" as const, category: "Despesas Fixas", description: "Equipamento", amount: 200, payment: "PIX", status: "Pendente", ...installmentDetails(true, "6") };
+    const data = normalizeData({ ...base, transactions: [transaction] });
+    expect(data.transactions[0]?.installmentMonthsRemaining).toBe(6);
+    expect(summary(data).expenses).toBe(200);
+    expect(data.transactions).toHaveLength(1);
+  });
+
+  it("registra 3 meses restantes em uma conta a receber sem multiplicar a receita", () => {
+    const transaction = { id: "receber", date: "2026-11-24", type: "Entrada" as const, category: "Serviços", description: "Pacote", amount: 150, payment: "PIX", status: "Pendente", ...installmentDetails(true, "3") };
+    expect(transaction.installmentMonthsRemaining).toBe(3);
+    expect(summary({ ...base, transactions: [transaction] }).revenue).toBe(150);
+  });
+
+  it("permite atualizar os meses restantes e remover o parcelamento", () => {
+    const transaction = { id: "editar", date: "2026-11-24", type: "Saída" as const, category: "Despesas Fixas", description: "Conta", amount: 100, payment: "PIX", status: "Pendente", ...installmentDetails(true, "6") };
+    const data = updateTransaction({ ...base, transactions: [transaction] }, transaction.id, { ...transaction, ...installmentDetails(true, "5") });
+    expect(data.transactions[0]?.installmentMonthsRemaining).toBe(5);
+    const { installmentMonthsRemaining: _remaining, ...ordinary } = transaction;
+    expect(updateTransaction(data, transaction.id, { ...ordinary, ...installmentDetails(false, "5") }).transactions[0]).not.toHaveProperty("installmentMonthsRemaining");
+  });
+
+  it("exige meses restantes inteiros e positivos apenas para contas parceladas", () => {
+    for (const value of ["", "0", "-1", "1.5", "abc"]) expect(() => installmentDetails(true, value)).toThrow();
+    expect(installmentDetails(false, "")).toEqual({});
+    expect(installmentDetails(true, "1")).toEqual({ installmentMonthsRemaining: 1 });
+  });
+
   it("teto de pró-labore é 50% do lucro", () => {
     const s = summary({
       ...base,
