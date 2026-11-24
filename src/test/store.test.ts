@@ -4,20 +4,31 @@ import {
   addPaymentMethod,
   addStaff,
   addStockItem,
+  availableMonths,
+  availableYears,
+  buildShoppingListText,
   deletePaymentMethod,
   deleteStaff,
   deleteStockItem,
   deleteTransaction,
+  filterStock,
   filterTransactions,
   getPaymentMethods,
+  getServiceGoal,
   installmentDetails,
+  monthly,
   nextStockCode,
   normalizeData,
+  parseBatchTransactions,
+  scopeDataByMonth,
   summary,
+  toggleTransactionPaid,
   updatePaymentMethod,
+  updateService,
   updateStaff,
   updateStockItem,
   updateTransaction,
+  updateWithdrawal,
   type Data,
 } from "@/lib/store";
 
@@ -213,5 +224,117 @@ describe("CRUD de lançamentos, estoque, funcionários e formas de pagamento", (
     expect(filterTransactions(txs, { type: "Entrada", payment: "PIX" }).map((t) => t.id)).toEqual(["1"]);
     expect(filterTransactions(txs, { category: "Venda Produtos" }).map((t) => t.id)).toEqual(["3"]);
     expect(filterTransactions(txs, { dateFrom: "2026-11-04", dateTo: "2026-11-09" }).map((t) => t.id)).toEqual(["2"]);
+  });
+
+  it("filtra por mês/ano e calcula realizado vs pendente", () => {
+    const d: Data = {
+      ...base,
+      serviceGoal: 15000,
+      transactions: [
+        { id: "1", date: "2025-11-10", type: "Entrada", category: "Serviços", description: "Ano passado", amount: 500, payment: "PIX", status: "Concluído" },
+        { id: "2", date: "2026-11-03", type: "Entrada", category: "Serviços", description: "Pago", amount: 300, payment: "PIX", status: "Concluído" },
+        { id: "3", date: "2026-11-05", type: "Entrada", category: "Serviços", description: "A receber", amount: 120, payment: "PIX", status: "Pendente", installmentMonthsRemaining: 2 },
+        { id: "4", date: "2026-11-06", type: "Saída", category: "Despesas Fixas", description: "A pagar", amount: 80, payment: "Boleto", status: "Pendente" },
+        { id: "5", date: "2026-11-07", type: "Saída", category: "Marketing", description: "Cancelado", amount: 999, payment: "PIX", status: "Cancelado" },
+      ],
+    };
+    expect(getServiceGoal(d)).toBe(15000);
+    expect(availableMonths(d)).toEqual(["2026-11", "2025-11"]);
+    expect(availableYears(d)).toEqual(["2026", "2025"]);
+
+    const nov26 = scopeDataByMonth(d, "2026-11");
+    const s = summary(nov26);
+    expect(s.revenue).toBe(420);
+    expect(s.realizedRevenue).toBe(300);
+    expect(s.pendingIn).toBe(120);
+    expect(s.expenses).toBe(80);
+    expect(s.realizedExpenses).toBe(0);
+    expect(s.pendingOut).toBe(80);
+    expect(s.pendingCount).toBe(2);
+
+    expect(monthly(d, "2026")[10]?.inc).toBe(420);
+    expect(monthly(d, "2025")[10]?.inc).toBe(500);
+
+    expect(filterTransactions(nov26.transactions, { status: "Pendente" })).toHaveLength(2);
+    expect(filterTransactions(nov26.transactions, { onlyInstallments: true }).map((t) => t.id)).toEqual(["3"]);
+
+    const toggled = toggleTransactionPaid(nov26, "4");
+    expect(toggled.transactions.find((t) => t.id === "4")?.status).toBe("Pago");
+  });
+
+  it("edita atendimento, edita retirada, filtra estoque e gera lista de compras", () => {
+    const d0: Data = {
+      ...base,
+      services: [{ date: "2026-11-03", staff: "Camila", client: "Ana", service: "Escova", amount: 80, rate: 0.25 }],
+      withdrawals: [{ id: "PL-1", date: "2026-11-05", description: "Quinzenal", amount: 300, payment: "PIX" }],
+      stock: [
+        { code: "EST-001", name: "Coloração Wella", category: "Colorimetria", min: 5, qty: 2, cost: 40 },
+        { code: "EST-002", name: "Gel Vòlia", category: "Nail Care", min: 4, qty: 10, cost: 60 },
+      ],
+    };
+    const d1 = updateService(d0, 0, { date: "2026-11-04", staff: "Camila", client: "Ana", service: "Escova + Hidratação", amount: 140, rate: 0.3 });
+    expect(d1.services[0]?.amount).toBe(140);
+    expect(d1.services[0]?.rate).toBe(0.3);
+
+    const d2 = updateWithdrawal(d1, "PL-1", { date: "2026-11-06", description: "Atualizada", amount: 450, payment: "Dinheiro" });
+    expect(d2.withdrawals[0]?.amount).toBe(450);
+    expect(d2.withdrawals[0]?.payment).toBe("Dinheiro");
+
+    expect(filterStock(d2.stock, { query: "coloracao" }).map((i) => i.code)).toEqual(["EST-001"]);
+    expect(filterStock(d2.stock, { onlyCritical: true }).map((i) => i.code)).toEqual(["EST-001"]);
+    const shopping = buildShoppingListText(d2.stock);
+    expect(shopping).toContain("Coloração Wella");
+    expect(shopping).toContain("comprar 8 un.");
+  });
+
+  it("interpreta importação em lote de blocos e linhas separadas por ponto e vírgula", () => {
+    const raw = `descriçao Atendimento: Escova Médio - Margareth Santos de Souza
+Serviços
+via PIX
++ R$ 60,00
+-------
+descriçao Atendimento: Tratamentos Wella - Daiane Farias
+Serviços
+via Cartão Crédito
++ R$ 150,00`;
+
+    const parsed = parseBatchTransactions(raw, {
+      date: "2026-11-03",
+      type: "Entrada",
+      category: "Serviços",
+      payment: "PIX",
+      status: "Concluído",
+      categories: ["Serviços", "Venda Produtos", "Comissão"],
+      paymentMethods: [...DEFAULT_PAYMENT_METHODS],
+    });
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({
+      date: "2026-11-03",
+      type: "Entrada",
+      category: "Serviços",
+      description: "Atendimento: Escova Médio - Margareth Santos de Souza",
+      amount: 60,
+      payment: "PIX",
+    });
+    expect(parsed[1]).toMatchObject({
+      amount: 150,
+      payment: "Cartão Crédito",
+    });
+
+    const csvParsed = parseBatchTransactions("Compra luvas; -85,50; Dinheiro; 04/11/2026", {
+      date: "2026-11-03",
+      type: "Entrada",
+      category: "Insumos/Produtos",
+      payment: "PIX",
+      status: "Concluído",
+      categories: ["Serviços", "Insumos/Produtos"],
+      paymentMethods: [...DEFAULT_PAYMENT_METHODS],
+    });
+    expect(csvParsed[0]).toMatchObject({
+      date: "2026-11-04",
+      type: "Saída",
+      amount: 85.5,
+      payment: "Dinheiro",
+    });
   });
 });

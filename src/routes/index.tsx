@@ -1,41 +1,58 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { CreditCard, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Calendar, Check, CheckCircle2, Copy, CreditCard, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
 import { DashboardCharts } from "@/components/studio/charts";
 import { InstallmentFields } from "@/components/studio/installment-fields";
+import { BatchImportDialog } from "@/components/studio/batch-import";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   addStaff,
   addStockItem,
+  availableMonths,
+  availableYears,
   brl,
+  buildShoppingListText,
   deleteStaff,
   deleteStockItem,
   deleteTransaction,
   fdate,
+  filterStock,
   filterTransactions,
+  formatYearMonth,
   getPaymentMethods,
+  getServiceGoal,
   installmentDetails,
   monthly,
   pct,
+  scopeDataByMonth,
   summary,
+  toggleTransactionPaid,
+  updateService,
   updateStaff,
   updateStockItem,
   updateTransaction,
+  updateWithdrawal,
   useStore,
   type Data,
   type Item,
+  type Service,
   type Staff,
   type Tx,
+  type Withdrawal,
 } from "@/lib/store";
 import {
   ConfirmDeleteDialog,
+  ServiceEditDialog,
   StaffDialog,
   StockItemDialog,
   TX_CATEGORIES,
+  TX_STATUSES,
   TransactionEditDialog,
+  WithdrawalEditDialog,
 } from "@/components/studio/dialogs";
 import { PaymentMethodsDialog, PaymentMethodsManager } from "@/components/studio/payment-methods";
 
@@ -127,6 +144,13 @@ function Login() {
 function Studio({ userId }: { userId: string }) {
   const { data, setData, reset, ready } = useStore(userId);
   const [tab, setTab] = useState<Tab>("Painel");
+  const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const months = availableMonths(data);
+  const effectiveMonth =
+    selectedMonth === "all" || (selectedMonth && months.includes(selectedMonth))
+      ? selectedMonth
+      : (months[0] ?? "all");
+
   return (
     <div className="min-h-screen md:flex">
       <aside className="bg-sidebar text-sidebar-foreground md:w-60 md:min-h-screen p-5 flex flex-wrap items-start md:flex-nowrap md:flex-col gap-4">
@@ -149,14 +173,19 @@ function Studio({ userId }: { userId: string }) {
         <button onClick={() => supabase.auth.signOut()} className="md:hidden ml-auto text-xs whitespace-nowrap">Sair</button>
       </aside>
       <main className="flex-1 min-w-0 p-5 md:p-10 max-w-6xl">
-        <h2 className="text-4xl font-semibold mb-6">{tab}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h2 className="text-4xl font-semibold">{tab}</h2>
+          {ready && (tab === "Painel" || tab === "Equipe" || tab === "Pró-Labore") && (
+            <MonthPicker months={months} value={effectiveMonth} onChange={setSelectedMonth} />
+          )}
+        </div>
         {!ready && <p className="text-muted-foreground">Carregando seus dados…</p>}
         {ready && <>
-        {tab === "Painel" && <Dashboard data={data} />}
+        {tab === "Painel" && <Dashboard data={data} setData={setData} selectedMonth={effectiveMonth} />}
         {tab === "Fluxo de Caixa" && <Cash data={data} setData={setData} />}
         {tab === "Estoque" && <Stock data={data} setData={setData} />}
-        {tab === "Equipe" && <Team data={data} setData={setData} />}
-        {tab === "Pró-Labore" && <ProLabore data={data} setData={setData} />}
+        {tab === "Equipe" && <Team data={data} setData={setData} selectedMonth={effectiveMonth} />}
+        {tab === "Pró-Labore" && <ProLabore data={data} setData={setData} selectedMonth={effectiveMonth} />}
         {tab === "Formas de Pagamento" && <PaymentMethodsTab data={data} setData={setData} />}
         {tab === "Anual" && <Annual data={data} />}
         </>}
@@ -165,7 +194,27 @@ function Studio({ userId }: { userId: string }) {
   );
 }
 
-function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | undefined }) {
+function MonthPicker({ months, value, onChange }: { months: string[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-sm">
+      <Calendar className="h-4 w-4 text-muted-foreground" />
+      <span className="text-xs text-muted-foreground">Período:</span>
+      <select
+        aria-label="Selecionar mês"
+        className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="all">Todos os períodos</option>
+        {months.map((m) => (
+          <option key={m} value={m}>{formatYearMonth(m)}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string | undefined; tone?: "good" | "bad" | undefined }) {
   return (
     <div className="rounded-xl border bg-card p-5">
       <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
@@ -219,16 +268,47 @@ const secondaryBtn = "inline-flex items-center justify-center gap-1.5 rounded-md
 const del = (onClick: () => void) => <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-destructive text-xs hover:underline cursor-pointer"><Trash2 className="h-3.5 w-3.5" />Excluir</button>;
 const editBtn = (onClick: () => void) => <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-primary text-xs hover:underline cursor-pointer"><Pencil className="h-3.5 w-3.5" />Editar</button>;
 
-function Dashboard({ data }: { data: Data }) {
-  const s = summary(data);
+function Dashboard({ data, setData, selectedMonth }: Props & { selectedMonth: string }) {
+  const scoped = scopeDataByMonth(data, selectedMonth);
+  const s = summary(scoped);
+  const goal = getServiceGoal(data);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState(String(goal));
+
+  const saveGoal = () => {
+    const parsed = Number(goalInput);
+    if (!(parsed > 0)) {
+      toast.error("Informe uma meta maior que zero.");
+      return;
+    }
+    setData((d) => ({ ...d, serviceGoal: parsed }));
+    setEditingGoal(false);
+    toast.success("Meta de serviços atualizada.");
+  };
+
   const lines = [["Serviços de beleza", s.services], ["Venda de produtos", s.products], ["Insumos e produtos", s.supplies], ["Despesas fixas e variáveis", s.other]] as const;
+  const chartYear = selectedMonth === "all" ? undefined : selectedMonth.slice(0, 4);
+
   return (
     <>
       <Grid>
-        <Kpi label="Receita total" value={brl(s.revenue)} hint="Faturamento bruto" />
-        <Kpi label="Despesas operacionais" value={brl(s.expenses)} hint="Custos e saídas" />
-        <Kpi label="Lucro líquido" value={brl(s.profit)} tone={s.profit >= 0 ? "good" : "bad"} hint="Receita − despesas" />
-        <Kpi label="Margem líquida" value={pct(s.margin)} />
+        <Kpi
+          label="Receita total"
+          value={brl(s.revenue)}
+          hint={s.pendingIn > 0 ? `Em caixa ${brl(s.realizedRevenue)} · A receber ${brl(s.pendingIn)}` : "Faturamento bruto"}
+        />
+        <Kpi
+          label="Despesas operacionais"
+          value={brl(s.expenses)}
+          hint={s.pendingOut > 0 ? `Pagas ${brl(s.realizedExpenses)} · A pagar ${brl(s.pendingOut)}` : "Custos e saídas"}
+        />
+        <Kpi
+          label="Lucro líquido"
+          value={brl(s.profit)}
+          tone={s.profit >= 0 ? "good" : "bad"}
+          hint={s.pendingCount > 0 ? `Realizado em caixa: ${brl(s.realizedProfit)}` : "Receita − despesas"}
+        />
+        <Kpi label="Margem líquida" value={pct(s.margin)} hint={s.pendingCount > 0 ? `${s.pendingCount} lançamento(s) pendente(s)` : undefined} />
         <Kpi label="Estoque ativo" value={brl(s.stockValue)} hint={`${s.critical} itens para repor`} tone={s.critical ? "bad" : undefined} />
         <Kpi label="Pró-labore retirado" value={brl(s.withdrawn)} hint={`Teto seguro ${brl(s.ceiling)}`} tone={s.withdrawn > s.ceiling ? "bad" : "good"} />
         <Kpi label="Folha equipe" value={brl(s.payroll)} hint="Salários + comissões" />
@@ -239,9 +319,49 @@ function Dashboard({ data }: { data: Data }) {
         {lines.map(([l, v]) => (
           <div key={l}><div className="flex justify-between text-sm mb-1"><span>{l}</span><span className="font-medium">{brl(v)}</span></div><Bar value={v} max={Math.max(s.revenue, s.expenses)} /></div>
         ))}
-        <p className="text-sm text-muted-foreground">Meta de serviços: R$ 12.000,00 — {pct(s.services / 12000)} atingido</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-sm text-muted-foreground">
+          {editingGoal ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Meta de serviços (R$):</span>
+              <input
+                type="number"
+                step="100"
+                min="1"
+                className="w-32 rounded-md border bg-background px-2.5 py-1 text-sm text-foreground"
+                value={goalInput}
+                onChange={(e) => setGoalInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveGoal();
+                  if (e.key === "Escape") setEditingGoal(false);
+                }}
+                autoFocus
+              />
+              <button type="button" onClick={saveGoal} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline cursor-pointer">
+                <Check className="h-3.5 w-3.5" />Salvar
+              </button>
+              <button type="button" onClick={() => setEditingGoal(false)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline cursor-pointer">
+                <X className="h-3.5 w-3.5" />Cancelar
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <span>Meta de serviços: {brl(goal)} — {pct(goal > 0 ? s.services / goal : 0)} atingido</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setGoalInput(String(goal));
+                  setEditingGoal(true);
+                }}
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline cursor-pointer"
+              >
+                <Pencil className="h-3 w-3" />
+                Editar meta
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      <DashboardCharts data={data} />
+      <DashboardCharts data={scoped} annualData={data} year={chartYear} />
     </>
   );
 }
@@ -257,16 +377,20 @@ function Cash({ data, setData }: Props) {
     description: "",
     amount: "",
     payment: paymentMethods[0] ?? "PIX",
+    status: "Concluído",
   });
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"Todos" | Tx["type"]>("Todos");
   const [categoryFilter, setCategoryFilter] = useState("Todas");
   const [paymentFilter, setPaymentFilter] = useState("Todas");
+  const [statusFilter, setStatusFilter] = useState("Todos");
+  const [onlyInstallments, setOnlyInstallments] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [editingTx, setEditingTx] = useState<Tx | null>(null);
   const [deletingTx, setDeletingTx] = useState<Tx | null>(null);
   const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
 
   const effectivePayment = paymentMethods.includes(f.payment) ? f.payment : (paymentMethods[0] ?? "");
   const filterCategoryOptions = Array.from(
@@ -285,6 +409,8 @@ function Cash({ data, setData }: Props) {
     filter !== "Todos" ||
     activeCategoryFilter !== "Todas" ||
     activePaymentFilter !== "Todas" ||
+    statusFilter !== "Todos" ||
+    onlyInstallments ||
     Boolean(dateFrom) ||
     Boolean(dateTo);
 
@@ -293,6 +419,8 @@ function Cash({ data, setData }: Props) {
     setFilter("Todos");
     setCategoryFilter("Todas");
     setPaymentFilter("Todas");
+    setStatusFilter("Todos");
+    setOnlyInstallments(false);
     setDateFrom("");
     setDateTo("");
   };
@@ -305,6 +433,8 @@ function Cash({ data, setData }: Props) {
     let installment: Pick<Tx, "installmentMonthsRemaining">;
     try { installment = installmentDetails(parcelled, months); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Confira os meses restantes."); return; }
+    const resolvedStatus =
+      f.status === "Pendente" ? "Pendente" : f.type === "Saída" ? "Pago" : "Concluído";
     setData((d) => ({
       ...d,
       transactions: [
@@ -316,7 +446,7 @@ function Cash({ data, setData }: Props) {
           payment: effectivePayment,
           amount: Number(f.amount),
           id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`,
-          status: f.type === "Saída" ? "Pago" : "Concluído",
+          status: resolvedStatus,
         },
       ],
     }));
@@ -332,19 +462,66 @@ function Cash({ data, setData }: Props) {
     type: filter,
     category: activeCategoryFilter,
     payment: activePaymentFilter,
+    status: statusFilter,
+    onlyInstallments,
     dateFrom,
     dateTo,
   });
-  const filteredIn = list.filter((t) => t.type === "Entrada").reduce((a, t) => a + t.amount, 0);
-  const filteredOut = list.filter((t) => t.type === "Saída").reduce((a, t) => a + t.amount, 0);
+  const filteredIn = list.filter((t) => t.type === "Entrada" && t.status !== "Cancelado").reduce((a, t) => a + t.amount, 0);
+  const filteredOut = list.filter((t) => t.type === "Saída" && t.status !== "Cancelado").reduce((a, t) => a + t.amount, 0);
+
+  const renderStatus = (t: Tx) => {
+    if (t.status === "Cancelado") {
+      return <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground line-through">Cancelado</span>;
+    }
+    const isPending = t.status === "Pendente";
+    return (
+      <button
+        type="button"
+        title={isPending ? "Clique para marcar como pago/recebido" : "Clique para marcar como pendente"}
+        onClick={() => {
+          setData((d) => toggleTransactionPaid(d, t.id));
+          toast.success(isPending ? "Lançamento marcado como pago/concluído." : "Lançamento marcado como pendente.");
+        }}
+        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer transition-opacity hover:opacity-80 ${
+          isPending
+            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+            : "bg-success/15 text-success"
+        }`}
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        {t.status || (t.type === "Saída" ? "Pago" : "Concluído")}
+      </button>
+    );
+  };
 
   return (
     <>
       <Grid>
-        <Kpi label="Entradas" value={brl(s.revenue)} tone="good" />
-        <Kpi label="Saídas" value={brl(s.expenses)} tone="bad" />
-        <Kpi label="Saldo" value={brl(s.profit)} />
-        <Kpi label="Movimentações" value={String(data.transactions.length)} />
+        <Kpi
+          label="Entradas"
+          value={brl(s.revenue)}
+          tone="good"
+          hint={s.pendingIn > 0 ? `Em caixa ${brl(s.realizedRevenue)} · A receber ${brl(s.pendingIn)}` : "Realizado no caixa"}
+        />
+        <Kpi
+          label="Saídas"
+          value={brl(s.expenses)}
+          tone="bad"
+          hint={s.pendingOut > 0 ? `Pagas ${brl(s.realizedExpenses)} · A pagar ${brl(s.pendingOut)}` : "Despesas registradas"}
+        />
+        <Kpi
+          label="Saldo"
+          value={brl(s.profit)}
+          tone={s.profit >= 0 ? "good" : "bad"}
+          hint={s.pendingCount > 0 ? `Realizado em caixa: ${brl(s.realizedProfit)}` : `${data.transactions.length} movimentações`}
+        />
+        <Kpi
+          label="Pendentes"
+          value={String(s.pendingCount)}
+          tone={s.pendingCount > 0 ? "bad" : "good"}
+          hint={s.pendingCount > 0 ? `Receber ${brl(s.pendingIn)} · Pagar ${brl(s.pendingOut)}` : "Tudo quitado"}
+        />
       </Grid>
       <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
@@ -356,6 +533,10 @@ function Cash({ data, setData }: Props) {
         </select>
         <input className={`${input} sm:col-span-2`} placeholder="Descrição" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         <input className={input} aria-label={parcelled ? "Valor da parcela" : "Valor"} type="number" step="0.01" min="0.01" placeholder={parcelled ? "Valor da parcela" : "Valor"} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <select className={input} aria-label="Status do lançamento" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>
+          <option value="Concluído">{f.type === "Saída" ? "Pago" : "Concluído"}</option>
+          <option value="Pendente">Pendente</option>
+        </select>
         <InstallmentFields id="cash" parcelled={parcelled} months={months} onParcelledChange={setParcelled} onMonthsChange={setMonths} />
         <Button type="submit" className="sm:col-span-2 lg:col-span-full">Lançar</Button>
       </form>
@@ -382,7 +563,7 @@ function Cash({ data, setData }: Props) {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {(["Todos", "Entrada", "Saída"] as const).map((x) => (
               <button
                 key={x}
@@ -393,13 +574,26 @@ function Cash({ data, setData }: Props) {
                 {x}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setOnlyInstallments((v) => !v)}
+              className={`rounded-full px-3 py-1.5 text-sm border cursor-pointer ${onlyInstallments ? "bg-secondary font-medium" : "bg-background hover:bg-muted"}`}
+            >
+              Parcelados
+            </button>
           </div>
-          <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
-            <CreditCard className="h-4 w-4" />
-            Gerenciar formas de pagamento
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setBatchOpen(true)} className={secondaryBtn}>
+              <Upload className="h-4 w-4" />
+              Importar em lote
+            </button>
+            <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
+              <CreditCard className="h-4 w-4" />
+              Formas de pagamento
+            </button>
+          </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 items-center">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6 items-center">
           <select
             aria-label="Filtrar por categoria"
             className={input}
@@ -417,6 +611,15 @@ function Cash({ data, setData }: Props) {
           >
             <option value="Todas">Todas as formas</option>
             {filterPaymentOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select
+            aria-label="Filtrar por status"
+            className={input}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="Todos">Todos os status</option>
+            {TX_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
           </select>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="whitespace-nowrap">De:</span>
@@ -471,7 +674,7 @@ function Cash({ data, setData }: Props) {
       ) : (
         <Table
           stickyLast
-          head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Parcelamento", "Ações"]}
+          head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Status", "Parcelamento", "Ações"]}
           rows={list.map((t) => [
             fdate(t.date),
             <span className={t.type === "Entrada" ? "text-success" : "text-destructive"}>{t.type}</span>,
@@ -479,6 +682,7 @@ function Cash({ data, setData }: Props) {
             <div className="min-w-44 max-w-xs whitespace-normal leading-snug">{t.description}</div>,
             brl(t.amount),
             t.payment,
+            renderStatus(t),
             t.installmentMonthsRemaining ? `${t.installmentMonthsRemaining} ${t.installmentMonthsRemaining === 1 ? "mês restante" : "meses restantes"}` : "—",
             <span className="inline-flex items-center gap-3">
               {editBtn(() => setEditingTx(t))}
@@ -510,6 +714,23 @@ function Cash({ data, setData }: Props) {
         }}
       />
       <PaymentMethodsDialog open={paymentsOpen} onOpenChange={setPaymentsOpen} data={data} setData={setData} />
+      <BatchImportDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        paymentMethods={paymentMethods}
+        onImport={(items) => {
+          setData((d) => {
+            const baseCount = d.transactions.length;
+            const stamp = Date.now() % 1000;
+            const created: Tx[] = items.map((item, idx) => ({
+              ...item,
+              id: `TR-${String(baseCount + idx + 1).padStart(3, "0")}-${(stamp + idx) % 1000}`,
+            }));
+            return { ...d, transactions: [...d.transactions, ...created] };
+          });
+          toast.success(`${items.length} lançamento(s) importado(s).`);
+        }}
+      />
     </>
   );
 }
@@ -518,8 +739,22 @@ function Stock({ data, setData }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("Todas");
+  const [onlyCritical, setOnlyCritical] = useState(false);
+
   const upd = (code: string, qty: number) => setData((d) => ({ ...d, stock: d.stock.map((i) => (i.code === code ? { ...i, qty: Math.max(0, qty) } : i)) }));
   const s = summary(data);
+
+  const stockCategories = Array.from(new Set(data.stock.map((i) => i.category).filter(Boolean)));
+  const activeCategory =
+    categoryFilter === "Todas" || stockCategories.includes(categoryFilter) ? categoryFilter : "Todas";
+  const hasFilters = Boolean(search.trim()) || activeCategory !== "Todas" || onlyCritical;
+  const visibleStock = filterStock(data.stock, {
+    query: search,
+    category: activeCategory,
+    onlyCritical,
+  });
 
   const openNew = () => {
     setEditingItem(null);
@@ -530,6 +765,20 @@ function Stock({ data, setData }: Props) {
     setDialogOpen(true);
   };
 
+  const copyShoppingList = async () => {
+    const text = buildShoppingListText(data.stock);
+    if (!text) {
+      toast.info("Nenhum item abaixo do mínimo para repor.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Lista de compras copiada para a área de transferência!");
+    } catch {
+      toast.error("Não foi possível copiar automaticamente. Verifique a permissão do navegador.");
+    }
+  };
+
   return (
     <>
       <Grid>
@@ -538,22 +787,90 @@ function Stock({ data, setData }: Props) {
         <Kpi label="Repor urgente" value={String(s.critical)} tone={s.critical ? "bad" : "good"} />
         <Kpi label="Custo médio unitário" value={brl(data.stock.reduce((a, i) => a + i.cost, 0) / (data.stock.length || 1))} />
       </Grid>
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-2xl font-semibold">Itens do estoque</h3>
-        <button type="button" onClick={openNew} className={btn}>
-          <Plus className="h-4 w-4" />
-          Novo item
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={copyShoppingList}
+            disabled={s.critical === 0}
+            className={`${secondaryBtn} disabled:opacity-50`}
+          >
+            <Copy className="h-4 w-4" />
+            Copiar lista de compras
+          </button>
+          <button type="button" onClick={openNew} className={btn}>
+            <Plus className="h-4 w-4" />
+            Novo item
+          </button>
+        </div>
+      </div>
+      <div className="rounded-xl border bg-card p-4 mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-52">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="search"
+            aria-label="Pesquisar itens do estoque"
+            className="w-full rounded-md border bg-background pl-9 pr-8 py-2 text-sm"
+            placeholder="Pesquisar por nome, código ou categoria..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="Limpar pesquisa"
+              onClick={() => setSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <select
+          aria-label="Filtrar estoque por categoria"
+          className={input}
+          value={activeCategory}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+        >
+          <option value="Todas">Todas as categorias</option>
+          {stockCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button
+          type="button"
+          onClick={() => setOnlyCritical((v) => !v)}
+          className={`rounded-full px-3 py-1.5 text-sm border cursor-pointer ${onlyCritical ? "bg-destructive/15 border-destructive/40 text-destructive font-medium" : "bg-background hover:bg-muted"}`}
+        >
+          Repor urgente ({s.critical})
         </button>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch("");
+              setCategoryFilter("Todas");
+              setOnlyCritical(false);
+            }}
+            className={secondaryBtn}
+          >
+            <X className="h-4 w-4" />
+            Limpar
+          </button>
+        )}
       </div>
       {data.stock.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
           Nenhum item no estoque. Clique em &quot;Novo item&quot; para cadastrar.
         </div>
+      ) : visibleStock.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Nenhum item encontrado para os filtros selecionados.
+        </div>
       ) : (
         <Table
           stickyLast
           head={["Item", "Mín.", "Atual", "Custo un.", "Total", "Status", "Comprar", "Ações"]}
-          rows={data.stock.map((i) => [
+          rows={visibleStock.map((i) => [
             <div className="min-w-44 max-w-xs whitespace-normal">
               <div className="font-medium leading-snug">{i.name}</div>
               <div className="text-xs text-muted-foreground">{i.code} · {i.category}</div>
@@ -607,14 +924,26 @@ function Stock({ data, setData }: Props) {
   );
 }
 
-function Team({ data, setData }: Props) {
-  const s = summary(data);
+function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string }) {
+  const scoped = scopeDataByMonth(data, selectedMonth);
+  const s = summary(scoped);
+  const paymentMethods = getPaymentMethods(data);
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
+  const [syncCash, setSyncCash] = useState(false);
+  const [cashPayment, setCashPayment] = useState(paymentMethods[0] ?? "PIX");
   const [staffDialogOpen, setStaffDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Staff | null>(null);
   const [deletingMember, setDeletingMember] = useState<Staff | null>(null);
+  const [editingService, setEditingService] = useState<{ index: number; service: Service } | null>(null);
+  const [deletingService, setDeletingService] = useState<{ index: number; service: Service } | null>(null);
 
   const selectedStaff = data.staff.some((x) => x.name === f.staff) ? f.staff : (data.staff[0]?.name ?? "");
+  const effectiveCashPayment = paymentMethods.includes(cashPayment) ? cashPayment : (paymentMethods[0] ?? "PIX");
+
+  const indexedServices = data.services
+    .map((service, index) => ({ service, index }))
+    .filter(({ service }) => selectedMonth === "all" || service.date.startsWith(selectedMonth))
+    .sort((a, b) => b.service.date.localeCompare(a.service.date));
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -622,22 +951,43 @@ function Team({ data, setData }: Props) {
     if (!st) { toast.error("Cadastre e escolha um funcionário."); return; }
     if (!f.service.trim()) { toast.error("Preencha o serviço realizado."); return; }
     if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
-    setData((d) => ({
-      ...d,
-      services: [
+    const amount = Number(f.amount);
+    const client = f.client.trim();
+    const serviceName = f.service.trim();
+    setData((d) => {
+      const nextServices = [
         ...d.services,
         {
           date: f.date,
           staff: st.name,
-          client: f.client.trim(),
-          service: f.service.trim(),
-          amount: Number(f.amount),
+          client,
+          service: serviceName,
+          amount,
           rate: st.rate,
         },
-      ],
-    }));
+      ];
+      if (!syncCash) return { ...d, services: nextServices };
+      const desc = client ? `${serviceName} - ${client}` : serviceName;
+      return {
+        ...d,
+        services: nextServices,
+        transactions: [
+          ...d.transactions,
+          {
+            id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`,
+            date: f.date,
+            type: "Entrada",
+            category: "Serviços",
+            description: desc,
+            amount,
+            payment: effectiveCashPayment,
+            status: "Concluído",
+          },
+        ],
+      };
+    });
     setF({ ...f, staff: st.name, client: "", service: "", amount: "" });
-    toast.success("Atendimento registrado.");
+    toast.success(syncCash ? "Atendimento registrado e lançado no Fluxo de Caixa." : "Atendimento registrado.");
   };
 
   const deletingServiceCount = deletingMember
@@ -705,11 +1055,47 @@ function Team({ data, setData }: Props) {
         <input className={input} placeholder="Serviço" value={f.service} onChange={(e) => setF({ ...f, service: e.target.value })} />
         <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <button type="submit" className={btn}>Registrar</button>
+        <div className="sm:col-span-2 lg:col-span-3 flex flex-wrap items-center gap-3 pt-1">
+          <div className="flex items-center gap-2">
+            <Checkbox id="team-sync-cash" checked={syncCash} onCheckedChange={(checked) => setSyncCash(checked === true)} />
+            <label htmlFor="team-sync-cash" className="text-sm cursor-pointer">
+              Lançar entrada automaticamente no Fluxo de Caixa
+            </label>
+          </div>
+          {syncCash && (
+            <select
+              aria-label="Forma de pagamento para o fluxo de caixa"
+              className="rounded-md border bg-background px-2.5 py-1 text-sm"
+              value={effectiveCashPayment}
+              onChange={(e) => setCashPayment(e.target.value)}
+            >
+              {paymentMethods.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+        </div>
       </form>
-      <Table head={["Data", "Profissional", "Cliente", "Serviço", "Valor", "Comissão", ""]} rows={data.services.map((v, i) => [
-        fdate(v.date), v.staff, v.client, v.service, brl(v.amount), brl(v.amount * v.rate),
-        del(() => setData((d) => ({ ...d, services: d.services.filter((_, j) => j !== i) }))),
-      ])} />
+      {indexedServices.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Nenhum atendimento registrado neste período.
+        </div>
+      ) : (
+        <Table
+          stickyLast
+          head={["Data", "Profissional", "Cliente", "Serviço", "Valor", "Comissão", "Ações"]}
+          rows={indexedServices.map(({ service: v, index }) => [
+            fdate(v.date),
+            v.staff,
+            v.client,
+            <div className="min-w-40 max-w-xs whitespace-normal leading-snug">{v.service}</div>,
+            brl(v.amount),
+            brl(v.amount * v.rate),
+            <span className="inline-flex items-center gap-3">
+              {editBtn(() => setEditingService({ index, service: v }))}
+              {del(() => setDeletingService({ index, service: v }))}
+            </span>,
+          ])}
+        />
+      )}
       <StaffDialog
         member={editingMember}
         open={staffDialogOpen}
@@ -725,6 +1111,30 @@ function Team({ data, setData }: Props) {
             if (!f.staff) setF((prev) => ({ ...prev, staff: member.name }));
             toast.success("Funcionário adicionado.");
           }
+        }}
+      />
+      <ServiceEditDialog
+        service={editingService?.service ?? null}
+        index={editingService?.index ?? -1}
+        open={Boolean(editingService)}
+        onOpenChange={(open) => !open && setEditingService(null)}
+        staffList={data.staff}
+        onSave={(idx, updated) => {
+          setData((d) => updateService(d, idx, updated));
+          toast.success("Atendimento atualizado.");
+        }}
+      />
+      <ConfirmDeleteDialog
+        open={Boolean(deletingService)}
+        onOpenChange={(open) => !open && setDeletingService(null)}
+        title="Excluir atendimento?"
+        description={deletingService ? `Remover "${deletingService.service.service}" (${brl(deletingService.service.amount)}) da lista de atendimentos?` : ""}
+        onConfirm={() => {
+          if (!deletingService) return;
+          const idxToRemove = deletingService.index;
+          setData((d) => ({ ...d, services: d.services.filter((_, j) => j !== idxToRemove) }));
+          setDeletingService(null);
+          toast.success("Atendimento excluído.");
         }}
       />
       <ConfirmDeleteDialog
@@ -747,16 +1157,32 @@ function Team({ data, setData }: Props) {
   );
 }
 
-function ProLabore({ data, setData }: Props) {
-  const s = summary(data);
+function ProLabore({ data, setData, selectedMonth }: Props & { selectedMonth: string }) {
+  const scoped = scopeDataByMonth(data, selectedMonth);
+  const s = summary(scoped);
   const paymentMethods = getPaymentMethods(data);
   const defaultPayment = paymentMethods.includes("PIX Transferência")
     ? "PIX Transferência"
     : (paymentMethods[0] ?? "");
   const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", payment: defaultPayment });
   const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const [editingRate, setEditingRate] = useState(false);
+  const [rateInput, setRateInput] = useState(String(Math.round(data.safeRate * 100)));
+  const [editingWd, setEditingWd] = useState<Withdrawal | null>(null);
+  const [deletingWd, setDeletingWd] = useState<Withdrawal | null>(null);
 
   const effectivePayment = paymentMethods.includes(f.payment) ? f.payment : defaultPayment;
+
+  const saveRate = () => {
+    const parsed = Number(rateInput);
+    if (Number.isNaN(parsed) || parsed <= 0 || parsed > 100) {
+      toast.error("Informe um percentual entre 1% e 100%.");
+      return;
+    }
+    setData((d) => ({ ...d, safeRate: parsed / 100 }));
+    setEditingRate(false);
+    toast.success("Teto seguro atualizado.");
+  };
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -778,15 +1204,66 @@ function ProLabore({ data, setData }: Props) {
     setF({ ...f, description: "", amount: "", payment: effectivePayment });
     toast.success("Retirada registrada.");
   };
+
+  const visibleWithdrawals = [...scoped.withdrawals].sort((a, b) => b.date.localeCompare(a.date));
   const over = s.withdrawn > s.ceiling;
+
   return (
     <>
       <Grid>
         <Kpi label="Lucro líquido" value={brl(s.profit)} />
         <Kpi label={`Teto seguro (${pct(data.safeRate)})`} value={brl(s.ceiling)} />
-        <Kpi label="Retirado no mês" value={brl(s.withdrawn)} tone={over ? "bad" : "good"} hint={over ? "Acima do teto seguro" : "Retirada saudável"} />
+        <Kpi label="Retirado no período" value={brl(s.withdrawn)} tone={over ? "bad" : "good"} hint={over ? "Acima do teto seguro" : "Retirada saudável"} />
         <Kpi label="Disponível no teto" value={brl(s.ceiling - s.withdrawn)} hint={`Reserva do estúdio: ${brl(s.profit * (1 - data.safeRate))}`} />
       </Grid>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div className="text-sm text-muted-foreground">
+          {editingRate ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Teto seguro (% do lucro):</span>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                className="w-20 rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+                value={rateInput}
+                onChange={(e) => setRateInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveRate();
+                  if (e.key === "Escape") setEditingRate(false);
+                }}
+                autoFocus
+              />
+              <button type="button" onClick={saveRate} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline cursor-pointer">
+                <Check className="h-3.5 w-3.5" />Salvar
+              </button>
+              <button type="button" onClick={() => setEditingRate(false)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline cursor-pointer">
+                <X className="h-3.5 w-3.5" />Cancelar
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span>Teto configurado em <strong className="text-foreground">{pct(data.safeRate)}</strong> do lucro</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setRateInput(String(Math.round(data.safeRate * 100)));
+                  setEditingRate(true);
+                }}
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline cursor-pointer"
+              >
+                <Pencil className="h-3 w-3" />
+                Alterar %
+              </button>
+            </div>
+          )}
+        </div>
+        <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
+          <CreditCard className="h-4 w-4" />
+          Gerenciar formas de pagamento
+        </button>
+      </div>
       <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <input className={input} placeholder="Finalidade" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
@@ -797,16 +1274,48 @@ function ProLabore({ data, setData }: Props) {
         </select>
         <button type="submit" className={btn}>Registrar retirada</button>
       </form>
-      <div className="flex justify-end mb-3">
-        <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
-          <CreditCard className="h-4 w-4" />
-          Gerenciar formas de pagamento
-        </button>
-      </div>
-      <Table head={["Data", "Finalidade", "Valor", "Pagamento", ""]} rows={data.withdrawals.map((w) => [
-        fdate(w.date), w.description, brl(w.amount), w.payment,
-        del(() => setData((d) => ({ ...d, withdrawals: d.withdrawals.filter((x) => x.id !== w.id) }))),
-      ])} />
+      {visibleWithdrawals.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Nenhuma retirada registrada neste período.
+        </div>
+      ) : (
+        <Table
+          stickyLast
+          head={["Data", "Finalidade", "Valor", "Pagamento", "Ações"]}
+          rows={visibleWithdrawals.map((w) => [
+            fdate(w.date),
+            <div className="min-w-40 max-w-xs whitespace-normal leading-snug">{w.description}</div>,
+            brl(w.amount),
+            w.payment,
+            <span className="inline-flex items-center gap-3">
+              {editBtn(() => setEditingWd(w))}
+              {del(() => setDeletingWd(w))}
+            </span>,
+          ])}
+        />
+      )}
+      <WithdrawalEditDialog
+        withdrawal={editingWd}
+        open={Boolean(editingWd)}
+        onOpenChange={(open) => !open && setEditingWd(null)}
+        paymentMethods={paymentMethods}
+        onSave={(id, updated) => {
+          setData((d) => updateWithdrawal(d, id, updated));
+          toast.success("Retirada atualizada.");
+        }}
+      />
+      <ConfirmDeleteDialog
+        open={Boolean(deletingWd)}
+        onOpenChange={(open) => !open && setDeletingWd(null)}
+        title="Excluir retirada?"
+        description={deletingWd ? `Remover "${deletingWd.description}" (${brl(deletingWd.amount)}) do pró-labore?` : ""}
+        onConfirm={() => {
+          if (!deletingWd) return;
+          setData((d) => ({ ...d, withdrawals: d.withdrawals.filter((x) => x.id !== deletingWd.id) }));
+          setDeletingWd(null);
+          toast.success("Retirada excluída.");
+        }}
+      />
       <PaymentMethodsDialog open={paymentsOpen} onOpenChange={setPaymentsOpen} data={data} setData={setData} />
     </>
   );
@@ -836,11 +1345,34 @@ function PaymentMethodsTab({ data, setData }: Props) {
 }
 
 function Annual({ data }: { data: Data }) {
-  const m = monthly(data);
+  const years = availableYears(data);
+  const [selectedYear, setSelectedYear] = useState<string>("");
+  const effectiveYear =
+    selectedYear === "all" || (selectedYear && years.includes(selectedYear))
+      ? selectedYear
+      : (years[0] ?? "all");
+  const m = monthly(data, effectiveYear);
   const max = Math.max(1, ...m.map((x) => x.inc));
   const tot = m.reduce((a, x) => ({ inc: a.inc + x.inc, out: a.out + x.out, pl: a.pl + x.pl, profit: a.profit + x.profit }), { inc: 0, out: 0, pl: 0, profit: 0 });
   return (
     <>
+      <div className="flex justify-end mb-4">
+        <label className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-sm">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Ano:</span>
+          <select
+            aria-label="Selecionar ano"
+            className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer"
+            value={effectiveYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+          >
+            <option value="all">Todos os anos</option>
+            {years.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       <Grid>
         <Kpi label="Receita anual" value={brl(tot.inc)} />
         <Kpi label="Despesas" value={brl(tot.out)} />

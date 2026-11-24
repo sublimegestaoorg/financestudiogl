@@ -14,8 +14,11 @@ export type Data = {
   withdrawals: Withdrawal[];
   staff: Staff[];
   safeRate: number;
+  serviceGoal?: number;
   paymentMethods?: string[];
 };
+
+export const DEFAULT_SERVICE_GOAL = 12000;
 
 export const DEFAULT_PAYMENT_METHODS = [
   "PIX",
@@ -27,17 +30,22 @@ export const DEFAULT_PAYMENT_METHODS = [
 ];
 
 const initial: Data = {
-  ...(seed as Omit<Data, "staff" | "safeRate" | "paymentMethods">),
+  ...(seed as Omit<Data, "staff" | "safeRate" | "serviceGoal" | "paymentMethods">),
   staff: [
     { name: "Camila Silva", role: "Cabeleireira & Colorista", salary: 1800, rate: 0.25, advance: 200 },
     { name: "Larissa Santos", role: "Manicure & Nail Designer", salary: 1500, rate: 0.3, advance: 150 },
   ],
   safeRate: 0.5,
+  serviceGoal: DEFAULT_SERVICE_GOAL,
   paymentMethods: DEFAULT_PAYMENT_METHODS,
 };
 
 export function getPaymentMethods(d: Data): string[] {
   return Array.isArray(d.paymentMethods) ? d.paymentMethods : DEFAULT_PAYMENT_METHODS;
+}
+
+export function getServiceGoal(d: Data): number {
+  return typeof d.serviceGoal === "number" && d.serviceGoal > 0 ? d.serviceGoal : DEFAULT_SERVICE_GOAL;
 }
 
 export function normalizeData(raw: Partial<Data> | null | undefined): Data {
@@ -47,6 +55,8 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
   const withdrawals = Array.isArray(raw?.withdrawals) ? raw.withdrawals : initial.withdrawals;
   const staff = Array.isArray(raw?.staff) ? raw.staff : initial.staff;
   const safeRate = typeof raw?.safeRate === "number" ? raw.safeRate : initial.safeRate;
+  const serviceGoal =
+    typeof raw?.serviceGoal === "number" && raw.serviceGoal > 0 ? raw.serviceGoal : DEFAULT_SERVICE_GOAL;
   let paymentMethods: string[];
   if (Array.isArray(raw?.paymentMethods)) {
     paymentMethods = raw.paymentMethods.map((m) => m.trim()).filter(Boolean);
@@ -61,7 +71,7 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
       }
     }
   }
-  return { transactions, stock, services, withdrawals, staff, safeRate, paymentMethods };
+  return { transactions, stock, services, withdrawals, staff, safeRate, serviceGoal, paymentMethods };
 }
 
 export function installmentDetails(parcelled: boolean, months: string): Pick<Tx, "installmentMonthsRemaining"> {
@@ -84,11 +94,39 @@ export function deleteTransaction(d: Data, id: string): Data {
   return { ...d, transactions: d.transactions.filter((t) => t.id !== id) };
 }
 
+export function toggleTransactionPaid(d: Data, id: string): Data {
+  return {
+    ...d,
+    transactions: d.transactions.map((t) => {
+      if (t.id !== id) return t;
+      const nextStatus =
+        t.status === "Pendente" ? (t.type === "Saída" ? "Pago" : "Concluído") : "Pendente";
+      return { ...t, status: nextStatus };
+    }),
+  };
+}
+
+export function updateService(d: Data, index: number, updated: Service): Data {
+  return {
+    ...d,
+    services: d.services.map((v, i) => (i === index ? updated : v)),
+  };
+}
+
+export function updateWithdrawal(d: Data, id: string, updated: Omit<Withdrawal, "id">): Data {
+  return {
+    ...d,
+    withdrawals: d.withdrawals.map((w) => (w.id === id ? { ...updated, id } : w)),
+  };
+}
+
 export type TxFilters = {
   query?: string | undefined;
   type?: "Todos" | Tx["type"] | undefined;
   category?: string | undefined;
   payment?: string | undefined;
+  status?: string | undefined;
+  onlyInstallments?: boolean | undefined;
   dateFrom?: string | undefined;
   dateTo?: string | undefined;
 };
@@ -104,6 +142,8 @@ export function filterTransactions(transactions: Tx[], filters: TxFilters): Tx[]
   const type = filters.type && filters.type !== "Todos" ? filters.type : "";
   const category = filters.category && filters.category !== "Todas" ? filters.category : "";
   const payment = filters.payment && filters.payment !== "Todas" ? filters.payment : "";
+  const status = filters.status && filters.status !== "Todos" ? filters.status : "";
+  const onlyInstallments = Boolean(filters.onlyInstallments);
   const dateFrom = filters.dateFrom?.trim() ?? "";
   const dateTo = filters.dateTo?.trim() ?? "";
 
@@ -112,6 +152,8 @@ export function filterTransactions(transactions: Tx[], filters: TxFilters): Tx[]
       if (type && t.type !== type) return false;
       if (category && t.category !== category) return false;
       if (payment && t.payment !== payment) return false;
+      if (status && t.status !== status) return false;
+      if (onlyInstallments && !t.installmentMonthsRemaining) return false;
       if (dateFrom && t.date < dateFrom) return false;
       if (dateTo && t.date > dateTo) return false;
       if (q) {
@@ -123,6 +165,217 @@ export function filterTransactions(transactions: Tx[], filters: TxFilters): Tx[]
       return true;
     })
     .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export type StockFilters = {
+  query?: string | undefined;
+  category?: string | undefined;
+  onlyCritical?: boolean | undefined;
+};
+
+export function filterStock(stock: Item[], filters: StockFilters): Item[] {
+  const q = filters.query ? normalizeSearch(filters.query.trim()) : "";
+  const category = filters.category && filters.category !== "Todas" ? filters.category : "";
+  const onlyCritical = Boolean(filters.onlyCritical);
+
+  return stock.filter((i) => {
+    if (category && i.category !== category) return false;
+    if (onlyCritical && i.qty > i.min) return false;
+    if (q) {
+      const haystack = normalizeSearch(`${i.code} ${i.name} ${i.category}`);
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+export function buildShoppingListText(stock: Item[]): string {
+  const critical = stock.filter((i) => i.qty <= i.min);
+  if (critical.length === 0) return "";
+  let total = 0;
+  const lines = critical.map((i) => {
+    const buy = Math.max(1, i.min * 2 - i.qty);
+    const est = buy * i.cost;
+    total += est;
+    return `- ${i.name} (${i.code}): comprar ${buy} un. [atual: ${i.qty} / mín: ${i.min}] — est. ${brl(est)}`;
+  });
+  return `Lista de Compras — Estúdio Geisa Lorena\n${lines.join("\n")}\n\nTotal estimado: ${brl(total)}`;
+}
+
+export type BatchImportDefaults = {
+  date: string;
+  type: Tx["type"];
+  category: string;
+  payment: string;
+  status: string;
+  categories: string[];
+  paymentMethods: string[];
+};
+
+export type ParsedBatchTx = Omit<Tx, "id">;
+
+function parseBrAmount(raw: string): { amount: number; sign: "+" | "-" | null } | null {
+  const m = /([+-])?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[.,]\d{1,2})?)/i.exec(raw);
+  if (!m?.[2]) return null;
+  const numStr = m[2].includes(",") ? m[2].replace(/\./g, "").replace(",", ".") : m[2];
+  const amount = Number(numStr);
+  if (!(amount > 0)) return null;
+  const sign = m[1] === "+" || m[1] === "-" ? m[1] : null;
+  return { amount, sign };
+}
+
+function parseDateFromText(raw: string): string | null {
+  const iso = /\b(\d{4}-\d{2}-\d{2})\b/.exec(raw);
+  if (iso?.[1]) return iso[1];
+  const br = /\b(\d{2})\/(\d{2})\/(\d{4})\b/.exec(raw);
+  if (br?.[1] && br[2] && br[3]) return `${br[3]}-${br[2]}-${br[1]}`;
+  return null;
+}
+
+export function parseBatchTransactions(text: string, defaults: BatchImportDefaults): ParsedBatchTx[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  const hasBlockSeparators = /\n\s*-{3,}\s*\n|\n\s*\n/.test(trimmed);
+  const rawBlocks = hasBlockSeparators
+    ? trimmed
+        .split(/\n\s*-{3,}\s*\n|\n\s*\n/)
+        .map((b) => b.trim())
+        .filter(Boolean)
+    : trimmed
+        .split(/\n/)
+        .map((b) => b.trim())
+        .filter(Boolean);
+
+  const normalizedCategories = defaults.categories.map((c) => ({ raw: c, norm: normalizeSearch(c) }));
+  const normalizedPayments = [...defaults.paymentMethods]
+    .sort((a, b) => b.length - a.length)
+    .map((p) => ({ raw: p, norm: normalizeSearch(p) }));
+
+  const results: ParsedBatchTx[] = [];
+
+  for (const block of rawBlocks) {
+    const lines = block
+      .split(/\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !/^-{3,}$/.test(l));
+    if (lines.length === 0) continue;
+
+    let date = defaults.date;
+    let type: Tx["type"] = defaults.type;
+    let category = defaults.category;
+    let payment = defaults.payment;
+    let amount = 0;
+    const descParts: string[] = [];
+
+    const firstLine = lines[0];
+    if (lines.length === 1 && firstLine?.includes(";")) {
+      const parts = firstLine.split(";").map((p) => p.trim());
+      if (parts[0]) descParts.push(parts[0]);
+      for (const p of parts.slice(1)) {
+        const d = parseDateFromText(p);
+        if (d) {
+          date = d;
+          continue;
+        }
+        const parsedVal = parseBrAmount(p);
+        if (parsedVal && amount === 0) {
+          amount = parsedVal.amount;
+          if (parsedVal.sign === "+") type = "Entrada";
+          if (parsedVal.sign === "-") type = "Saída";
+          continue;
+        }
+        const normP = normalizeSearch(p);
+        const matchedPay = normalizedPayments.find((m) => m.norm === normP || normP.includes(m.norm));
+        if (matchedPay) {
+          payment = matchedPay.raw;
+          continue;
+        }
+        const matchedCat = normalizedCategories.find((c) => c.norm === normP);
+        if (matchedCat) {
+          category = matchedCat.raw;
+          continue;
+        }
+      }
+    } else {
+      for (const line of lines) {
+        const normLine = normalizeSearch(line);
+
+        const dateFound = parseDateFromText(line);
+        if (dateFound && line.replace(/\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2}/, "").trim().length <= 6) {
+          date = dateFound;
+          continue;
+        }
+
+        if (/^descri[cç][aã]o\b/i.test(line)) {
+          const cleaned = line.replace(/^descri[cç][aã]o\s*:?\s*/i, "").trim();
+          if (cleaned) descParts.push(cleaned);
+          continue;
+        }
+
+        if (/^via\s+/i.test(line)) {
+          const payText = line.replace(/^via\s+/i, "").trim();
+          const normPay = normalizeSearch(payText);
+          const matchedPay = normalizedPayments.find((m) => m.norm === normPay || normPay.includes(m.norm));
+          payment = matchedPay ? matchedPay.raw : payText;
+          continue;
+        }
+
+        const exactCategory = normalizedCategories.find((c) => c.norm === normLine);
+        if (exactCategory) {
+          category = exactCategory.raw;
+          continue;
+        }
+
+        const exactPayment = normalizedPayments.find((m) => m.norm === normLine);
+        if (exactPayment) {
+          payment = exactPayment.raw;
+          continue;
+        }
+
+        if (/^[+-]?\s*R\$/.test(line) || /^[+-]\s*\d/.test(line)) {
+          const parsedVal = parseBrAmount(line);
+          if (parsedVal) {
+            amount = parsedVal.amount;
+            if (parsedVal.sign === "+") type = "Entrada";
+            if (parsedVal.sign === "-") type = "Saída";
+            continue;
+          }
+        }
+
+        // Fallback: single line with trailing value like "Escova - Ana R$ 80,00"
+        const inlineAmount = /([+-]?\s*R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*R\$\s*\d+(?:[.,]\d{1,2})?)\s*$/i.exec(line);
+        if (inlineAmount?.[1] && amount === 0) {
+          const parsedVal = parseBrAmount(inlineAmount[1]);
+          if (parsedVal) {
+            amount = parsedVal.amount;
+            if (parsedVal.sign === "+") type = "Entrada";
+            if (parsedVal.sign === "-") type = "Saída";
+            const rest = line.slice(0, inlineAmount.index).replace(/[-–—:]\s*$/, "").trim();
+            if (rest) descParts.push(rest);
+            continue;
+          }
+        }
+
+        descParts.push(line);
+      }
+    }
+
+    const description = descParts.join(" — ").trim();
+    if (description && amount > 0) {
+      results.push({
+        date,
+        type,
+        category,
+        description,
+        amount,
+        payment,
+        status: defaults.status === "Pendente" ? "Pendente" : type === "Saída" ? "Pago" : "Concluído",
+      });
+    }
+  }
+
+  return results;
 }
 
 export function nextStockCode(stock: Item[]): string {
@@ -274,11 +527,54 @@ export const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency",
 export const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 export const fdate = (s: string) => s.split("-").reverse().join("/");
 
+export function availableMonths(d: Data): string[] {
+  const set = new Set<string>();
+  for (const date of [
+    ...d.transactions.map((t) => t.date),
+    ...d.services.map((s) => s.date),
+    ...d.withdrawals.map((w) => w.date),
+  ]) {
+    if (/^\d{4}-\d{2}/.test(date)) set.add(date.slice(0, 7));
+  }
+  return [...set].sort((a, b) => b.localeCompare(a));
+}
+
+export function availableYears(d: Data): string[] {
+  const set = new Set<string>();
+  for (const ym of availableMonths(d)) set.add(ym.slice(0, 4));
+  if (set.size === 0) set.add(new Date().toISOString().slice(0, 4));
+  return [...set].sort((a, b) => b.localeCompare(a));
+}
+
+export function formatYearMonth(ym: string): string {
+  const year = ym.slice(0, 4);
+  const monthIndex = Number(ym.slice(5, 7)) - 1;
+  const monthName = MONTHS[monthIndex];
+  return monthName ? `${monthName}/${year}` : ym;
+}
+
+export function scopeDataByMonth(d: Data, yearMonth: string): Data {
+  if (!yearMonth || yearMonth === "all") return d;
+  return {
+    ...d,
+    transactions: d.transactions.filter((t) => t.date.startsWith(yearMonth)),
+    services: d.services.filter((s) => s.date.startsWith(yearMonth)),
+    withdrawals: d.withdrawals.filter((w) => w.date.startsWith(yearMonth)),
+  };
+}
+
 export function summary(d: Data) {
   const sum = (a: Tx[]) => a.reduce((s, t) => s + t.amount, 0);
-  const inc = d.transactions.filter((t) => t.type === "Entrada");
-  const out = d.transactions.filter((t) => t.type === "Saída");
+  const active = d.transactions.filter((t) => t.status !== "Cancelado");
+  const inc = active.filter((t) => t.type === "Entrada");
+  const out = active.filter((t) => t.type === "Saída");
+  const realizedInc = inc.filter((t) => t.status !== "Pendente");
+  const realizedOut = out.filter((t) => t.status !== "Pendente");
+  const pendingInc = inc.filter((t) => t.status === "Pendente");
+  const pendingOutList = out.filter((t) => t.status === "Pendente");
   const revenue = sum(inc), expenses = sum(out), profit = revenue - expenses;
+  const realizedRevenue = sum(realizedInc), realizedExpenses = sum(realizedOut), realizedProfit = realizedRevenue - realizedExpenses;
+  const pendingIn = sum(pendingInc), pendingOut = sum(pendingOutList), pendingCount = pendingInc.length + pendingOutList.length;
   const services = sum(inc.filter((t) => t.category === "Serviços"));
   const products = sum(inc.filter((t) => t.category === "Venda Produtos"));
   const supplies = sum(out.filter((t) => t.category === "Insumos/Produtos"));
@@ -293,17 +589,43 @@ export function summary(d: Data) {
   const payroll = team.reduce((a, t) => a + t.net, 0);
   const withdrawn = d.withdrawals.reduce((a, w) => a + w.amount, 0);
   const ceiling = profit * d.safeRate;
-  return { revenue, expenses, profit, margin: revenue > 0 ? profit / revenue : 0, services, products, supplies, other: expenses - supplies, stockValue, critical, team, payroll, withdrawn, ceiling, residual: profit - withdrawn };
+  return {
+    revenue,
+    expenses,
+    profit,
+    realizedRevenue,
+    realizedExpenses,
+    realizedProfit,
+    pendingIn,
+    pendingOut,
+    pendingCount,
+    margin: revenue > 0 ? profit / revenue : 0,
+    services,
+    products,
+    supplies,
+    other: expenses - supplies,
+    stockValue,
+    critical,
+    team,
+    payroll,
+    withdrawn,
+    ceiling,
+    residual: profit - withdrawn,
+  };
 }
 
 export const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-export function monthly(d: Data) {
+export function monthly(d: Data, year?: string | undefined) {
   let acc = 0;
+  const activeTx = d.transactions.filter(
+    (t) => t.status !== "Cancelado" && (!year || year === "all" || t.date.startsWith(year)),
+  );
+  const activeWd = d.withdrawals.filter((w) => !year || year === "all" || w.date.startsWith(year));
   return MONTHS.map((m, i) => {
-    const tx = d.transactions.filter((t) => Number(t.date.slice(5, 7)) === i + 1);
+    const tx = activeTx.filter((t) => Number(t.date.slice(5, 7)) === i + 1);
     const inc = tx.filter((t) => t.type === "Entrada").reduce((a, t) => a + t.amount, 0);
     const out = tx.filter((t) => t.type === "Saída").reduce((a, t) => a + t.amount, 0);
-    const pl = d.withdrawals.filter((w) => Number(w.date.slice(5, 7)) === i + 1).reduce((a, w) => a + w.amount, 0);
+    const pl = activeWd.filter((w) => Number(w.date.slice(5, 7)) === i + 1).reduce((a, w) => a + w.amount, 0);
     const profit = inc - out - pl;
     acc += profit;
     return { month: m, inc, out, pl, profit, acc, margin: inc > 0 ? profit / inc : 0 };

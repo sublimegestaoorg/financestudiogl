@@ -15,18 +15,20 @@ function group<T>(arr: T[], key: (t: T) => string, val: (t: T) => number) {
   return [...m].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 }
 
-export function DashboardCharts({ data }: { data: Data }) {
-  const months = monthly(data).map((m) => ({ ...m, month: m.month.slice(0, 3) }));
+export function DashboardCharts({ data, annualData, year }: { data: Data; annualData?: Data | undefined; year?: string | undefined }) {
+  const months = monthly(annualData ?? data, year).map((m) => ({ ...m, month: m.month.slice(0, 3) }));
   const active = months.filter((m) => m.inc || m.out || m.pl);
   const series = active.length ? active : months;
-  const out = data.transactions.filter((t) => t.type === "Saída");
-  const inc = data.transactions.filter((t) => t.type === "Entrada");
+  const nonCancelled = data.transactions.filter((t) => t.status !== "Cancelado");
+  const out = nonCancelled.filter((t) => t.type === "Saída");
+  const inc = nonCancelled.filter((t) => t.type === "Entrada");
   const expCat = group(out, (t) => t.category, (t) => t.amount);
   const pay = group(inc, (t) => t.payment, (t) => t.amount);
   const team = summary(data).team.map((t) => ({ name: t.name.split(" ")[0], Faturado: t.billed, Comissão: t.commission }));
   const ax = { stroke: "var(--muted-foreground)", fontSize: 12 };
+  const empty = <div className="h-full grid place-items-center text-sm text-muted-foreground">Sem dados no período</div>;
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 lg:grid-cols-2 mt-6">
       <Card title="Entradas x Saídas por mês">
         <ResponsiveContainer><BarChart data={series}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="month" {...ax} /><YAxis tickFormatter={short} {...ax} /><Tooltip {...tip} /><Legend />
           <Bar dataKey="inc" name="Entradas" fill="var(--success)" radius={[4, 4, 0, 0]} /><Bar dataKey="out" name="Saídas" fill="var(--destructive)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
@@ -36,14 +38,20 @@ export function DashboardCharts({ data }: { data: Data }) {
           <Line dataKey="profit" name="Lucro do mês" stroke="var(--chart-1)" strokeWidth={2} /><Line dataKey="acc" name="Acumulado" stroke="var(--chart-2)" strokeWidth={2} /></LineChart></ResponsiveContainer>
       </Card>
       <Card title="Despesas por categoria">
-        <ResponsiveContainer><PieChart><Pie data={expCat} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85}>{expCat.map((_, i) => <Cell key={i} fill={C[i % C.length]} />)}</Pie><Tooltip {...tip} /><Legend /></PieChart></ResponsiveContainer>
+        {expCat.length === 0 ? empty : (
+          <ResponsiveContainer><PieChart><Pie data={expCat} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85}>{expCat.map((_, i) => <Cell key={i} fill={C[i % C.length]} />)}</Pie><Tooltip {...tip} /><Legend /></PieChart></ResponsiveContainer>
+        )}
       </Card>
       <Card title="Receita por forma de pagamento">
-        <ResponsiveContainer><PieChart><Pie data={pay} dataKey="value" nameKey="name" outerRadius={85}>{pay.map((_, i) => <Cell key={i} fill={C[i % C.length]} />)}</Pie><Tooltip {...tip} /><Legend /></PieChart></ResponsiveContainer>
+        {pay.length === 0 ? empty : (
+          <ResponsiveContainer><PieChart><Pie data={pay} dataKey="value" nameKey="name" outerRadius={85}>{pay.map((_, i) => <Cell key={i} fill={C[i % C.length]} />)}</Pie><Tooltip {...tip} /><Legend /></PieChart></ResponsiveContainer>
+        )}
       </Card>
       <Card title="Desempenho da equipe">
-        <ResponsiveContainer><BarChart data={team}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" {...ax} /><YAxis tickFormatter={short} {...ax} /><Tooltip {...tip} /><Legend />
-          <Bar dataKey="Faturado" fill="var(--chart-1)" radius={[4, 4, 0, 0]} /><Bar dataKey="Comissão" fill="var(--chart-2)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+        {team.length === 0 ? empty : (
+          <ResponsiveContainer><BarChart data={team}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" {...ax} /><YAxis tickFormatter={short} {...ax} /><Tooltip {...tip} /><Legend />
+            <Bar dataKey="Faturado" fill="var(--chart-1)" radius={[4, 4, 0, 0]} /><Bar dataKey="Comissão" fill="var(--chart-2)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+        )}
       </Card>
     </div>
   );

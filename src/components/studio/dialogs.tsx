@@ -19,8 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { nextStockCode, type Item, type Staff, type Tx } from "@/lib/store";
-import { installmentDetails } from "@/lib/store";
+import { installmentDetails, nextStockCode, type Item, type Service, type Staff, type Tx, type Withdrawal } from "@/lib/store";
 import { InstallmentFields } from "@/components/studio/installment-fields";
 import { Button } from "@/components/ui/button";
 
@@ -656,6 +655,244 @@ export function StaffDialog({
             </button>
             <button type="submit" className={primaryBtn}>
               {member ? "Salvar alterações" : "Adicionar funcionário"}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ServiceEditDialog({
+  service,
+  index,
+  open,
+  onOpenChange,
+  staffList,
+  onSave,
+}: {
+  service: Service | null;
+  index: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  staffList: Staff[];
+  onSave: (index: number, updated: Service) => void;
+}) {
+  const [date, setDate] = useState("");
+  const [staff, setStaff] = useState("");
+  const [client, setClient] = useState("");
+  const [serviceName, setServiceName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [ratePercent, setRatePercent] = useState("");
+
+  useEffect(() => {
+    if (open && service) {
+      setDate(service.date);
+      setStaff(service.staff);
+      setClient(service.client);
+      setServiceName(service.service);
+      setAmount(String(service.amount));
+      setRatePercent(String(Number((service.rate * 100).toFixed(2))));
+    }
+  }, [open, service]);
+
+  const staffOptions = Array.from(
+    new Set([
+      ...(staff ? [staff] : []),
+      ...staffList.map((s) => s.name),
+    ]),
+  );
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!service || index < 0) return;
+    if (!date) {
+      toast.error("Informe a data do atendimento.");
+      return;
+    }
+    if (!staff.trim()) {
+      toast.error("Escolha a profissional.");
+      return;
+    }
+    if (!serviceName.trim()) {
+      toast.error("Preencha o serviço realizado.");
+      return;
+    }
+    const parsedAmount = Number(amount);
+    if (!(parsedAmount > 0)) {
+      toast.error("Informe um valor maior que zero.");
+      return;
+    }
+    const parsedRate = Number(ratePercent || 0);
+    if (Number.isNaN(parsedRate) || parsedRate < 0 || parsedRate > 100) {
+      toast.error("A comissão deve ficar entre 0% e 100%.");
+      return;
+    }
+    onSave(index, {
+      date,
+      staff,
+      client: client.trim(),
+      service: serviceName.trim(),
+      amount: parsedAmount,
+      rate: parsedRate / 100,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Editar atendimento</DialogTitle>
+          <DialogDescription>Atualize os dados do atendimento e o percentual de comissão.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-date">Data</label>
+              <input id="srv-edit-date" type="date" className={fieldClass} value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-staff">Profissional</label>
+              <select
+                id="srv-edit-staff"
+                className={fieldClass}
+                value={staff}
+                onChange={(e) => {
+                  const nextStaff = e.target.value;
+                  setStaff(nextStaff);
+                  const found = staffList.find((s) => s.name === nextStaff);
+                  if (found) setRatePercent(String(Number((found.rate * 100).toFixed(2))));
+                }}
+              >
+                {staffOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-client">Cliente</label>
+              <input id="srv-edit-client" className={fieldClass} value={client} onChange={(e) => setClient(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-service">Serviço</label>
+              <input id="srv-edit-service" className={fieldClass} value={serviceName} onChange={(e) => setServiceName(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-amount">Valor (R$)</label>
+              <input id="srv-edit-amount" type="number" step="0.01" min="0.01" className={fieldClass} value={amount} onChange={(e) => setAmount(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="srv-edit-rate">Comissão (%)</label>
+              <input id="srv-edit-rate" type="number" step="0.1" min="0" max="100" className={fieldClass} value={ratePercent} onChange={(e) => setRatePercent(e.target.value)} required />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
+              Cancelar
+            </button>
+            <button type="submit" className={primaryBtn}>
+              Salvar alterações
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function WithdrawalEditDialog({
+  withdrawal,
+  open,
+  onOpenChange,
+  paymentMethods,
+  onSave,
+}: {
+  withdrawal: Withdrawal | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  paymentMethods: string[];
+  onSave: (id: string, updated: Omit<Withdrawal, "id">) => void;
+}) {
+  const [date, setDate] = useState("");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [payment, setPayment] = useState("");
+
+  useEffect(() => {
+    if (open && withdrawal) {
+      setDate(withdrawal.date);
+      setDescription(withdrawal.description);
+      setAmount(String(withdrawal.amount));
+      setPayment(withdrawal.payment);
+    }
+  }, [open, withdrawal]);
+
+  const payments =
+    payment && !paymentMethods.includes(payment) ? [payment, ...paymentMethods] : paymentMethods;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!withdrawal) return;
+    if (!date) {
+      toast.error("Informe a data da retirada.");
+      return;
+    }
+    const parsedAmount = Number(amount);
+    if (!(parsedAmount > 0)) {
+      toast.error("Informe um valor maior que zero.");
+      return;
+    }
+    if (!payment.trim()) {
+      toast.error("Selecione a forma de pagamento.");
+      return;
+    }
+    onSave(withdrawal.id, {
+      date,
+      description: description.trim() || "Retirada de pró-labore",
+      amount: parsedAmount,
+      payment,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Editar retirada de pró-labore</DialogTitle>
+          <DialogDescription>Atualize a data, finalidade, valor ou forma de pagamento da retirada.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelClass} htmlFor="wd-edit-date">Data</label>
+              <input id="wd-edit-date" type="date" className={fieldClass} value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="wd-edit-payment">Forma de pagamento</label>
+              <select id="wd-edit-payment" className={fieldClass} value={payment} onChange={(e) => setPayment(e.target.value)}>
+                {payments.length === 0 && <option value="">Sem formas cadastradas</option>}
+                {payments.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="wd-edit-desc">Finalidade</label>
+            <input id="wd-edit-desc" className={fieldClass} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="wd-edit-amount">Valor (R$)</label>
+            <input id="wd-edit-amount" type="number" step="0.01" min="0.01" className={fieldClass} value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          </div>
+          <DialogFooter className="gap-2">
+            <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
+              Cancelar
+            </button>
+            <button type="submit" className={primaryBtn}>
+              Salvar alterações
             </button>
           </DialogFooter>
         </form>
