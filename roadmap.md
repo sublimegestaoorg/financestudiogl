@@ -1,0 +1,2 @@
+- [x] Add remaining installment months to cash-flow creation, editing and display.
+- [x] Test payable/receivable installments and verify persistence through the signed-in app.

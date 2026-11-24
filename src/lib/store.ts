@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import seed from "@/data/seed.json";
 import { supabase } from "@/integrations/supabase/client";
 
-export type Tx = { id: string; date: string; type: "Entrada" | "Saída"; category: string; description: string; amount: number; payment: string; status: string };
+export type Tx = { id: string; date: string; type: "Entrada" | "Saída"; category: string; description: string; amount: number; payment: string; status: string; installmentMonthsRemaining?: number };
 export type Item = { code: string; name: string; category: string; min: number; qty: number; cost: number };
 export type Service = { date: string; staff: string; client: string; service: string; amount: number; rate: number };
 export type Withdrawal = { id: string; date: string; description: string; amount: number; payment: string };
@@ -62,6 +62,15 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
     }
   }
   return { transactions, stock, services, withdrawals, staff, safeRate, paymentMethods };
+}
+
+export function installmentDetails(parcelled: boolean, months: string): Pick<Tx, "installmentMonthsRemaining"> {
+  if (!parcelled) return {};
+  const remaining = Number(months);
+  if (!Number.isSafeInteger(remaining) || remaining < 1) {
+    throw new Error("Informe uma quantidade inteira de meses restantes, maior que zero.");
+  }
+  return { installmentMonthsRemaining: remaining };
 }
 
 export function updateTransaction(d: Data, id: string, updated: Omit<Tx, "id">): Data {

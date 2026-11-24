@@ -20,6 +20,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { nextStockCode, type Item, type Staff, type Tx } from "@/lib/store";
+import { installmentDetails } from "@/lib/store";
+import { InstallmentFields } from "@/components/studio/installment-fields";
+import { Button } from "@/components/ui/button";
 
 export const TX_CATEGORIES = [
   "Serviços",
@@ -107,6 +110,8 @@ export function TransactionEditDialog({
   const [amount, setAmount] = useState("");
   const [payment, setPayment] = useState("");
   const [status, setStatus] = useState("Concluído");
+  const [parcelled, setParcelled] = useState(false);
+  const [months, setMonths] = useState("");
 
   useEffect(() => {
     if (open && tx) {
@@ -117,6 +122,8 @@ export function TransactionEditDialog({
       setAmount(String(tx.amount));
       setPayment(tx.payment);
       setStatus(tx.status || "Concluído");
+      setParcelled(Boolean(tx.installmentMonthsRemaining));
+      setMonths(tx.installmentMonthsRemaining ? String(tx.installmentMonthsRemaining) : "");
     }
   }, [open, tx]);
 
@@ -146,7 +153,11 @@ export function TransactionEditDialog({
       toast.error("Selecione a forma de pagamento.");
       return;
     }
+    let installment: Pick<Tx, "installmentMonthsRemaining">;
+    try { installment = installmentDetails(parcelled, months); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Confira os meses restantes."); return; }
     onSave(tx.id, {
+      ...installment,
       date,
       type,
       category,
@@ -231,7 +242,7 @@ export function TransactionEditDialog({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className={labelClass} htmlFor="tx-edit-amount">Valor (R$)</label>
+              <label className={labelClass} htmlFor="tx-edit-amount">{parcelled ? "Valor da parcela (R$)" : "Valor (R$)"}</label>
               <input
                 id="tx-edit-amount"
                 type="number"
@@ -258,13 +269,14 @@ export function TransactionEditDialog({
               </select>
             </div>
           </div>
+          <InstallmentFields id="tx-edit" parcelled={parcelled} months={months} onParcelledChange={setParcelled} onMonthsChange={setMonths} />
           <DialogFooter className="gap-2">
-            <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
-            </button>
-            <button type="submit" className={primaryBtn}>
+            </Button>
+            <Button type="submit">
               Salvar alterações
-            </button>
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

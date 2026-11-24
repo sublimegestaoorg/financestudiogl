@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
 import { DashboardCharts } from "@/components/studio/charts";
+import { InstallmentFields } from "@/components/studio/installment-fields";
+import { Button } from "@/components/ui/button";
 import {
   addStaff,
   addStockItem,
@@ -14,6 +16,7 @@ import {
   deleteTransaction,
   fdate,
   getPaymentMethods,
+  installmentDetails,
   monthly,
   pct,
   summary,
@@ -244,6 +247,8 @@ function Dashboard({ data }: { data: Data }) {
 
 function Cash({ data, setData }: Props) {
   const paymentMethods = getPaymentMethods(data);
+  const [parcelled, setParcelled] = useState(false);
+  const [months, setMonths] = useState("");
   const [f, setF] = useState({
     date: new Date().toISOString().slice(0, 10),
     type: "Entrada" as Tx["type"],
@@ -270,12 +275,16 @@ function Cash({ data, setData }: Props) {
     if (!f.description.trim()) { toast.error("Preencha a descrição do lançamento."); return; }
     if (!(Number(f.amount) > 0)) { toast.error("Informe um valor maior que zero."); return; }
     if (!effectivePayment) { toast.error("Cadastre e selecione uma forma de pagamento."); return; }
+    let installment: Pick<Tx, "installmentMonthsRemaining">;
+    try { installment = installmentDetails(parcelled, months); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Confira os meses restantes."); return; }
     setData((d) => ({
       ...d,
       transactions: [
         ...d.transactions,
         {
           ...f,
+          ...installment,
           description: f.description.trim(),
           payment: effectivePayment,
           amount: Number(f.amount),
@@ -285,6 +294,8 @@ function Cash({ data, setData }: Props) {
       ],
     }));
     setF({ ...f, description: "", amount: "", payment: effectivePayment });
+    setParcelled(false);
+    setMonths("");
     toast.success("Lançamento registrado.");
   };
 
@@ -310,8 +321,9 @@ function Cash({ data, setData }: Props) {
           {paymentMethods.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
         <input className={`${input} sm:col-span-2`} placeholder="Descrição" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
-        <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        <button type="submit" className={btn}>Lançar</button>
+        <input className={input} aria-label={parcelled ? "Valor da parcela" : "Valor"} type="number" step="0.01" min="0.01" placeholder={parcelled ? "Valor da parcela" : "Valor"} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <InstallmentFields id="cash" parcelled={parcelled} months={months} onParcelledChange={setParcelled} onMonthsChange={setMonths} />
+        <Button type="submit" className="sm:col-span-2 lg:col-span-full">Lançar</Button>
       </form>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -340,7 +352,7 @@ function Cash({ data, setData }: Props) {
       ) : (
         <Table
           stickyLast
-          head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Ações"]}
+          head={["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Parcelamento", "Ações"]}
           rows={list.map((t) => [
             fdate(t.date),
             <span className={t.type === "Entrada" ? "text-success" : "text-destructive"}>{t.type}</span>,
@@ -348,6 +360,7 @@ function Cash({ data, setData }: Props) {
             <div className="min-w-44 max-w-xs whitespace-normal leading-snug">{t.description}</div>,
             brl(t.amount),
             t.payment,
+            t.installmentMonthsRemaining ? `${t.installmentMonthsRemaining} ${t.installmentMonthsRemaining === 1 ? "mês restante" : "meses restantes"}` : "—",
             <span className="inline-flex items-center gap-3">
               {editBtn(() => setEditingTx(t))}
               {del(() => setDeletingTx(t))}
