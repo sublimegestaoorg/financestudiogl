@@ -8,6 +8,7 @@ import {
   deleteStaff,
   deleteStockItem,
   deleteTransaction,
+  filterTransactions,
   getPaymentMethods,
   nextStockCode,
   normalizeData,
@@ -170,5 +171,18 @@ describe("CRUD de lançamentos, estoque, funcionários e formas de pagamento", (
     });
     expect(getPaymentMethods(legacy)).toContain("PIX");
     expect(getPaymentMethods(legacy)).toContain("PicPay");
+  });
+
+  it("pesquisa e filtra lançamentos por texto sem acento, tipo, categoria, pagamento e período", () => {
+    const txs = [
+      { id: "1", date: "2026-11-03", type: "Entrada" as const, category: "Serviços", description: "Escova Médio - Bárbara Veiga", amount: 60, payment: "PIX", status: "Concluído" },
+      { id: "2", date: "2026-11-05", type: "Saída" as const, category: "Comissão", description: "Comissão Camila", amount: 250, payment: "Transferência", status: "Pago" },
+      { id: "3", date: "2026-11-10", type: "Entrada" as const, category: "Venda Produtos", description: "Kit Home Care", amount: 180, payment: "Cartão Crédito", status: "Concluído" },
+    ];
+    expect(filterTransactions(txs, { query: "barbara" }).map((t) => t.id)).toEqual(["1"]);
+    expect(filterTransactions(txs, { query: "comissao" }).map((t) => t.id)).toEqual(["2"]);
+    expect(filterTransactions(txs, { type: "Entrada", payment: "PIX" }).map((t) => t.id)).toEqual(["1"]);
+    expect(filterTransactions(txs, { category: "Venda Produtos" }).map((t) => t.id)).toEqual(["3"]);
+    expect(filterTransactions(txs, { dateFrom: "2026-11-04", dateTo: "2026-11-09" }).map((t) => t.id)).toEqual(["2"]);
   });
 });

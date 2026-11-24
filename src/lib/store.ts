@@ -75,6 +75,47 @@ export function deleteTransaction(d: Data, id: string): Data {
   return { ...d, transactions: d.transactions.filter((t) => t.id !== id) };
 }
 
+export type TxFilters = {
+  query?: string | undefined;
+  type?: "Todos" | Tx["type"] | undefined;
+  category?: string | undefined;
+  payment?: string | undefined;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+};
+
+const normalizeSearch = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+export function filterTransactions(transactions: Tx[], filters: TxFilters): Tx[] {
+  const q = filters.query ? normalizeSearch(filters.query.trim()) : "";
+  const type = filters.type && filters.type !== "Todos" ? filters.type : "";
+  const category = filters.category && filters.category !== "Todas" ? filters.category : "";
+  const payment = filters.payment && filters.payment !== "Todas" ? filters.payment : "";
+  const dateFrom = filters.dateFrom?.trim() ?? "";
+  const dateTo = filters.dateTo?.trim() ?? "";
+
+  return transactions
+    .filter((t) => {
+      if (type && t.type !== type) return false;
+      if (category && t.category !== category) return false;
+      if (payment && t.payment !== payment) return false;
+      if (dateFrom && t.date < dateFrom) return false;
+      if (dateTo && t.date > dateTo) return false;
+      if (q) {
+        const haystack = normalizeSearch(
+          `${t.description} ${t.category} ${t.payment} ${t.status} ${t.date} ${fdate(t.date)} ${t.amount} ${brl(t.amount)}`,
+        );
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export function nextStockCode(stock: Item[]): string {
   let max = stock.length;
   const existing = new Set(stock.map((i) => i.code.toUpperCase()));

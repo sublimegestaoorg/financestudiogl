@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { CreditCard, Pencil, Plus, Trash2 } from "lucide-react";
+import { CreditCard, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   deleteStockItem,
   deleteTransaction,
   fdate,
+  filterTransactions,
   getPaymentMethods,
   monthly,
   pct,
@@ -250,18 +251,44 @@ function Cash({ data, setData }: Props) {
     amount: "",
     payment: paymentMethods[0] ?? "PIX",
   });
-  const [filter, setFilter] = useState("Todos");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"Todos" | Tx["type"]>("Todos");
+  const [categoryFilter, setCategoryFilter] = useState("Todas");
   const [paymentFilter, setPaymentFilter] = useState("Todas");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editingTx, setEditingTx] = useState<Tx | null>(null);
   const [deletingTx, setDeletingTx] = useState<Tx | null>(null);
   const [paymentsOpen, setPaymentsOpen] = useState(false);
 
   const effectivePayment = paymentMethods.includes(f.payment) ? f.payment : (paymentMethods[0] ?? "");
+  const filterCategoryOptions = Array.from(
+    new Set([...TX_CATEGORIES, ...data.transactions.map((t) => t.category).filter(Boolean)]),
+  );
   const filterPaymentOptions = Array.from(
     new Set([...paymentMethods, ...data.transactions.map((t) => t.payment).filter(Boolean)]),
   );
+  const activeCategoryFilter =
+    categoryFilter === "Todas" || filterCategoryOptions.includes(categoryFilter) ? categoryFilter : "Todas";
   const activePaymentFilter =
     paymentFilter === "Todas" || filterPaymentOptions.includes(paymentFilter) ? paymentFilter : "Todas";
+
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
+    filter !== "Todos" ||
+    activeCategoryFilter !== "Todas" ||
+    activePaymentFilter !== "Todas" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  const clearFilters = () => {
+    setSearch("");
+    setFilter("Todos");
+    setCategoryFilter("Todas");
+    setPaymentFilter("Todas");
+    setDateFrom("");
+    setDateTo("");
+  };
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -287,9 +314,16 @@ function Cash({ data, setData }: Props) {
   };
 
   const s = summary(data);
-  const list = [...data.transactions]
-    .filter((t) => (filter === "Todos" || t.type === filter) && (activePaymentFilter === "Todas" || t.payment === activePaymentFilter))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const list = filterTransactions(data.transactions, {
+    query: search,
+    type: filter,
+    category: activeCategoryFilter,
+    payment: activePaymentFilter,
+    dateFrom,
+    dateTo,
+  });
+  const filteredIn = list.filter((t) => t.type === "Entrada").reduce((a, t) => a + t.amount, 0);
+  const filteredOut = list.filter((t) => t.type === "Saída").reduce((a, t) => a + t.amount, 0);
 
   return (
     <>
@@ -311,25 +345,110 @@ function Cash({ data, setData }: Props) {
         <input className={input} type="number" step="0.01" min="0.01" placeholder="Valor" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <button type="submit" className={btn}>Lançar</button>
       </form>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {["Todos", "Entrada", "Saída"].map((x) => (
-            <button key={x} type="button" onClick={() => setFilter(x)} className={`rounded-full px-3 py-1 text-sm border cursor-pointer ${filter === x ? "bg-secondary font-medium" : ""}`}>{x}</button>
-          ))}
+      <div className="rounded-xl border bg-card p-4 mb-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="relative flex-1 min-w-56">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="search"
+              aria-label="Pesquisar lançamentos"
+              className="w-full rounded-md border bg-background pl-9 pr-8 py-2 text-sm"
+              placeholder="Pesquisar por descrição, categoria, pagamento, data ou valor..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label="Limpar pesquisa"
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {(["Todos", "Entrada", "Saída"] as const).map((x) => (
+              <button
+                key={x}
+                type="button"
+                onClick={() => setFilter(x)}
+                className={`rounded-full px-3 py-1.5 text-sm border cursor-pointer ${filter === x ? "bg-secondary font-medium" : "bg-background hover:bg-muted"}`}
+              >
+                {x}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
+            <CreditCard className="h-4 w-4" />
+            Gerenciar formas de pagamento
+          </button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 items-center">
+          <select
+            aria-label="Filtrar por categoria"
+            className={input}
+            value={activeCategoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+          >
+            <option value="Todas">Todas as categorias</option>
+            {filterCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <select
             aria-label="Filtrar por forma de pagamento"
-            className="rounded-full border bg-background px-3 py-1 text-sm"
+            className={input}
             value={activePaymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
           >
             <option value="Todas">Todas as formas</option>
             {filterPaymentOptions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">De:</span>
+            <input
+              type="date"
+              aria-label="Data inicial"
+              className={`${input} w-full`}
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">Até:</span>
+            <input
+              type="date"
+              aria-label="Data final"
+              className={`${input} w-full`}
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </label>
+          <div className="flex justify-end">
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className={`${secondaryBtn} w-full lg:w-auto`}>
+                <X className="h-4 w-4" />
+                Limpar filtros
+              </button>
+            )}
+          </div>
         </div>
-        <button type="button" onClick={() => setPaymentsOpen(true)} className={secondaryBtn}>
-          <CreditCard className="h-4 w-4" />
-          Gerenciar formas de pagamento
-        </button>
+        {hasActiveFilters && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 border-t text-xs text-muted-foreground">
+            <span>
+              Mostrando <strong className="text-foreground">{list.length}</strong> de {data.transactions.length} lançamentos
+            </span>
+            <span>
+              Entradas: <strong className="text-success">{brl(filteredIn)}</strong>
+            </span>
+            <span>
+              Saídas: <strong className="text-destructive">{brl(filteredOut)}</strong>
+            </span>
+            <span>
+              Saldo filtrado: <strong className="text-foreground">{brl(filteredIn - filteredOut)}</strong>
+            </span>
+          </div>
+        )}
       </div>
       {list.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
