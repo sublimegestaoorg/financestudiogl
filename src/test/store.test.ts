@@ -4,18 +4,23 @@ import {
   DEFAULT_PAYMENT_METHODS,
   addPaymentMethod,
   addStaff,
+  addStaffPayout,
   addStockItem,
   availableMonths,
   availableYears,
   buildShoppingListText,
   deletePaymentMethod,
   deleteStaff,
+  deleteStaffPayout,
   deleteStockItem,
   deleteTransaction,
+  filterIndexedServices,
   filterStock,
   filterTransactions,
   getPaymentMethods,
   getServiceGoal,
+  getStaffPayouts,
+  getWeekBounds,
   installmentDetails,
   monthly,
   nextStockCode,
@@ -23,15 +28,18 @@ import {
   parseBatchTransactions,
   recordStockPurchase,
   scopeDataByMonth,
+  staffTransferTotals,
   summary,
   todayLocal,
   toggleTransactionPaid,
   updatePaymentMethod,
   updateService,
   updateStaff,
+  updateStaffPayout,
   updateStockItem,
   updateTransaction,
   updateWithdrawal,
+  weeklyCommissionBreakdown,
   type Data,
 } from "@/lib/store";
 
@@ -406,5 +414,80 @@ via Cartão Crédito
     const csv = toCsv(["Descrição", "Valor"], [['Kit "Luxo"; 1L', "120,00"]]);
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain('"Kit ""Luxo""; 1L";120,00');
+  });
+
+  it("filtra atendimentos por profissional/texto, calcula repasse semanal e gerencia pagamentos de comissão e salário", () => {
+    const wb = getWeekBounds("2026-11-18"); // quarta-feira -> 16/11 a 22/11/2026
+    expect(wb).toEqual({ start: "2026-11-16", end: "2026-11-22", label: "16/11 a 22/11/2026" });
+
+    const d0: Data = {
+      ...base,
+      staff: [
+        { name: "Camila Silva", role: "Cabeleireira", salary: 1800, rate: 0.25, advance: 200 },
+        { name: "Larissa Santos", role: "Manicure", salary: 1500, rate: 0.3, advance: 0 },
+      ],
+      services: [
+        { date: "2026-11-17", staff: "Camila Silva", client: "Bárbara", service: "Mechas", amount: 400, rate: 0.25 },
+        { date: "2026-11-19", staff: "Camila Silva", client: "Patrícia", service: "Escova", amount: 200, rate: 0.25 },
+        { date: "2026-11-18", staff: "Larissa Santos", client: "Beatriz", service: "Alongamento", amount: 200, rate: 0.3 },
+      ],
+    };
+
+    const filtered = filterIndexedServices(d0.services, { query: "barbara", staff: "Camila Silva" });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.index).toBe(0);
+
+    // Antes do pagamento: Camila tem R$ 150 de comissão pendente na semana 16/11 a 22/11
+    const weekBefore = weeklyCommissionBreakdown(d0.services, getStaffPayouts(d0), "Camila Silva");
+    expect(weekBefore).toHaveLength(1);
+    expect(weekBefore[0]).toMatchObject({ commission: 150, paid: 0, remaining: 150, status: "Pendente" });
+
+    // Registra pagamento semanal de comissão com lançamento no caixa
+    const d1 = addStaffPayout(
+      d0,
+      {
+        date: "2026-11-21",
+        staff: "Camila Silva",
+        kind: "Comissão",
+        periodType: "Semana",
+        periodLabel: wb.label,
+        periodStart: wb.start,
+        periodEnd: wb.end,
+        amount: 150,
+        payment: "PIX",
+      },
+      true,
+    );
+    expect(getStaffPayouts(d1)).toHaveLength(1);
+    expect(d1.transactions).toHaveLength(1);
+    expect(d1.transactions[0]).toMatchObject({ type: "Saída", category: "Comissão", amount: 150 });
+
+    const weekAfter = weeklyCommissionBreakdown(d1.services, getStaffPayouts(d1), "Camila Silva");
+    expect(weekAfter[0]).toMatchObject({ commission: 150, paid: 150, remaining: 0, status: "Pago" });
+
+    // Total a repassar de Camila no período: net = 1800 + 150 - 200 = 1750; já pago = 150; falta = 1600
+    const transfer = staffTransferTotals("Camila Silva", 1750, getStaffPayouts(d1));
+    expect(transfer.paidTotal).toBe(150);
+    expect(transfer.remaining).toBe(1600);
+
+    // Renomear profissional propaga para pagamentos registrados
+    const payoutId = getStaffPayouts(d1)[0]?.id ?? "";
+    const d2 = updateStaff(d1, "Camila Silva", { name: "Camila Souza", role: "Cabeleireira", salary: 1800, rate: 0.25, advance: 200 });
+    expect(getStaffPayouts(d2)[0]?.staff).toBe("Camila Souza");
+
+    // Editar e excluir pagamento
+    const d3 = updateStaffPayout(d2, payoutId, {
+      date: "2026-11-22",
+      staff: "Camila Souza",
+      kind: "Salário",
+      periodType: "Mês",
+      periodLabel: "Novembro/2026",
+      periodStart: "2026-11-01",
+      periodEnd: "2026-11-30",
+      amount: 1600,
+      payment: "PIX",
+    });
+    expect(getStaffPayouts(d3)[0]).toMatchObject({ kind: "Salário", periodType: "Mês", amount: 1600 });
+    expect(getStaffPayouts(deleteStaffPayout(d3, payoutId))).toHaveLength(0);
   });
 });

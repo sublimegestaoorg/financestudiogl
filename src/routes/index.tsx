@@ -19,6 +19,7 @@ import {
   Sun,
   Trash2,
   Upload,
+  Wallet,
   X,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,11 +28,13 @@ import { toast } from "sonner";
 import { DashboardCharts } from "@/components/studio/charts";
 import { InstallmentFields } from "@/components/studio/installment-fields";
 import { BatchImportDialog } from "@/components/studio/batch-import";
+import { StaffPayoutDialog, TeamPayoutsSection, type PayoutPrefill } from "@/components/studio/team-payouts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { downloadCsv, printReport } from "@/lib/export";
 import {
   addStaff,
+  addStaffPayout,
   addStockItem,
   availableMonths,
   availableYears,
@@ -41,16 +44,20 @@ import {
   deleteStockItem,
   deleteTransaction,
   fdate,
+  filterIndexedServices,
   filterStock,
   filterTransactions,
   formatYearMonth,
   getPaymentMethods,
   getServiceGoal,
+  getStaffPayouts,
   installmentDetails,
   monthly,
+  payoutsInPeriod,
   pct,
   recordStockPurchase,
   scopeDataByMonth,
+  staffTransferTotals,
   summary,
   todayLocal,
   toggleTransactionPaid,
@@ -1191,6 +1198,13 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
   const scoped = scopeDataByMonth(data, selectedMonth);
   const s = summary(scoped);
   const paymentMethods = getPaymentMethods(data);
+  const scopedPayouts = payoutsInPeriod(getStaffPayouts(data), selectedMonth);
+
+  const [staffFilter, setStaffFilter] = useState("Todos");
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [serviceDateFrom, setServiceDateFrom] = useState("");
+  const [serviceDateTo, setServiceDateTo] = useState("");
+
   const [f, setF] = useState({ date: todayLocal(), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
   const [syncCash, setSyncCash] = useState(false);
   const [cashPayment, setCashPayment] = useState(paymentMethods[0] ?? "PIX");
@@ -1199,14 +1213,43 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
   const [deletingMember, setDeletingMember] = useState<Staff | null>(null);
   const [editingService, setEditingService] = useState<{ index: number; service: Service } | null>(null);
   const [deletingService, setDeletingService] = useState<{ index: number; service: Service } | null>(null);
+  const [payoutDialogOpen, setPayoutDialogOpen] = useState(false);
+  const [payoutPrefill, setPayoutPrefill] = useState<PayoutPrefill | null>(null);
 
-  const selectedStaff = data.staff.some((x) => x.name === f.staff) ? f.staff : (data.staff[0]?.name ?? "");
+  const activeStaffFilter =
+    staffFilter === "Todos" || data.staff.some((x) => x.name === staffFilter) ? staffFilter : "Todos";
+
+  const selectedStaff =
+    activeStaffFilter !== "Todos"
+      ? activeStaffFilter
+      : data.staff.some((x) => x.name === f.staff)
+        ? f.staff
+        : (data.staff[0]?.name ?? "");
   const effectiveCashPayment = paymentMethods.includes(cashPayment) ? cashPayment : (paymentMethods[0] ?? "PIX");
 
-  const indexedServices = data.services
-    .map((service, index) => ({ service, index }))
-    .filter(({ service }) => selectedMonth === "all" || service.date.startsWith(selectedMonth))
-    .sort((a, b) => b.service.date.localeCompare(a.service.date));
+  const visibleTeam =
+    activeStaffFilter === "Todos" ? s.team : s.team.filter((t) => t.name === activeStaffFilter);
+
+  const periodServices = filterIndexedServices(data.services, {
+    query: serviceSearch,
+    staff: activeStaffFilter,
+    dateFrom: serviceDateFrom,
+    dateTo: serviceDateTo,
+  }).filter(({ service }) => selectedMonth === "all" || service.date.startsWith(selectedMonth));
+
+  const hasServiceFilters =
+    Boolean(serviceSearch.trim()) ||
+    activeStaffFilter !== "Todos" ||
+    Boolean(serviceDateFrom) ||
+    Boolean(serviceDateTo);
+
+  const filteredBilled = periodServices.reduce((a, { service }) => a + service.amount, 0);
+  const filteredCommission = periodServices.reduce((a, { service }) => a + service.amount * service.rate, 0);
+
+  const openPayDialog = (prefill: PayoutPrefill) => {
+    setPayoutPrefill(prefill);
+    setPayoutDialogOpen(true);
+  };
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -1267,17 +1310,22 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
             onClick={() => {
               downloadCsv(
                 `folha-equipe-${selectedMonth === "all" ? "todos" : selectedMonth}.csv`,
-                ["Profissional", "Cargo", "Salário base", "Comissão %", "Serviços realizados", "Comissão devida", "Adiantamentos", "Líquido a pagar"],
-                s.team.map((t) => [
-                  t.name,
-                  t.role,
-                  t.salary.toFixed(2).replace(".", ","),
-                  (t.rate * 100).toFixed(1).replace(".", ","),
-                  t.billed.toFixed(2).replace(".", ","),
-                  t.commission.toFixed(2).replace(".", ","),
-                  t.advance.toFixed(2).replace(".", ","),
-                  t.net.toFixed(2).replace(".", ","),
-                ]),
+                ["Profissional", "Cargo", "Salário base", "Comissão %", "Serviços realizados", "Comissão devida", "Adiantamentos", "Líquido", "Já pago", "Falta repassar"],
+                visibleTeam.map((t) => {
+                  const tr = staffTransferTotals(t.name, t.net, scopedPayouts);
+                  return [
+                    t.name,
+                    t.role,
+                    t.salary.toFixed(2).replace(".", ","),
+                    (t.rate * 100).toFixed(1).replace(".", ","),
+                    t.billed.toFixed(2).replace(".", ","),
+                    t.commission.toFixed(2).replace(".", ","),
+                    t.advance.toFixed(2).replace(".", ","),
+                    t.net.toFixed(2).replace(".", ","),
+                    tr.paidTotal.toFixed(2).replace(".", ","),
+                    tr.remaining.toFixed(2).replace(".", ","),
+                  ];
+                }),
               );
               toast.success("CSV da folha exportado.");
             }}
@@ -1289,24 +1337,32 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
           <button
             type="button"
             onClick={() => {
+              const totalNet = visibleTeam.reduce((a, t) => a + t.net, 0);
+              const totalPaid = visibleTeam.reduce((a, t) => a + staffTransferTotals(t.name, t.net, scopedPayouts).paidTotal, 0);
+              const totalRem = visibleTeam.reduce((a, t) => a + staffTransferTotals(t.name, t.net, scopedPayouts).remaining, 0);
               const ok = printReport({
-                title: "Folha da Equipe",
+                title: activeStaffFilter === "Todos" ? "Folha da Equipe" : `Repasse — ${activeStaffFilter}`,
                 subtitle: selectedMonth === "all" ? "Todos os períodos" : formatYearMonth(selectedMonth),
                 kpis: [
-                  { label: "Total da folha", value: brl(s.payroll) },
-                  { label: "Profissionais", value: String(s.team.length) },
-                  { label: "Atendimentos no período", value: String(indexedServices.length) },
+                  { label: "Líquido no período", value: brl(totalNet) },
+                  { label: "Já pago", value: brl(totalPaid) },
+                  { label: "Falta repassar", value: brl(totalRem) },
                 ],
-                headers: ["Profissional", "Cargo", "Salário base", "Serviços", "Comissão", "Adiantamentos", "Líquido"],
-                rows: s.team.map((t) => [
-                  t.name,
-                  t.role,
-                  brl(t.salary),
-                  brl(t.billed),
-                  brl(t.commission),
-                  brl(t.advance),
-                  brl(t.net),
-                ]),
+                headers: ["Profissional", "Cargo", "Salário", "Serviços", "Comissão", "Adiant.", "Líquido", "Já pago", "A repassar"],
+                rows: visibleTeam.map((t) => {
+                  const tr = staffTransferTotals(t.name, t.net, scopedPayouts);
+                  return [
+                    t.name,
+                    t.role,
+                    brl(t.salary),
+                    brl(t.billed),
+                    brl(t.commission),
+                    brl(t.advance),
+                    brl(t.net),
+                    brl(tr.paidTotal),
+                    brl(tr.remaining),
+                  ];
+                }),
               });
               if (!ok) toast.error("Permita pop-ups para imprimir ou salvar em PDF.");
             }}
@@ -1328,42 +1384,112 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
           </button>
         </div>
       </div>
-      {s.team.length === 0 ? (
+
+      {data.staff.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-5">
+          <span className="text-xs font-medium text-muted-foreground mr-1">Separar por profissional:</span>
+          <button
+            type="button"
+            onClick={() => setStaffFilter("Todos")}
+            className={`rounded-full px-3 py-1 text-sm border cursor-pointer ${activeStaffFilter === "Todos" ? "bg-secondary font-medium" : "bg-card hover:bg-muted"}`}
+          >
+            Todas ({data.staff.length})
+          </button>
+          {data.staff.map((st) => (
+            <button
+              key={st.name}
+              type="button"
+              onClick={() => {
+                setStaffFilter(st.name);
+                setF((prev) => ({ ...prev, staff: st.name }));
+              }}
+              className={`rounded-full px-3 py-1 text-sm border cursor-pointer ${activeStaffFilter === st.name ? "bg-primary text-primary-foreground border-primary font-medium" : "bg-card hover:bg-muted"}`}
+            >
+              {st.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {visibleTeam.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground mb-8">
           Nenhum funcionário cadastrado. Clique em &quot;Novo funcionário&quot; para adicionar à equipe.
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 mb-8">
-          {s.team.map((t) => (
-            <div key={t.name} className="rounded-xl border bg-card p-5">
-              <div className="flex items-start justify-between gap-2 mb-3">
+        <div className={`grid gap-4 mb-8 ${visibleTeam.length === 1 ? "md:grid-cols-1 max-w-2xl" : "md:grid-cols-2"}`}>
+          {visibleTeam.map((t) => {
+            const transfer = staffTransferTotals(t.name, t.net, scopedPayouts);
+            const srvCount = scoped.services.filter((v) => v.staff === t.name).length;
+            const isFocused = activeStaffFilter === t.name;
+            return (
+              <div key={t.name} className="rounded-xl border bg-card p-5 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-2xl font-semibold">{t.name}</h3>
-                  <p className="text-sm text-muted-foreground">{t.role} · comissão {pct(t.rate)}</p>
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div>
+                      <h3 className="text-2xl font-semibold">{t.name}</h3>
+                      <p className="text-sm text-muted-foreground">{t.role} · comissão {pct(t.rate)}</p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-1">
+                      {editBtn(() => {
+                        setEditingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance });
+                        setStaffDialogOpen(true);
+                      })}
+                      {del(() =>
+                        setDeletingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance }),
+                      )}
+                    </div>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-y-1 text-sm">
+                    <dt>Salário base</dt><dd className="text-right">{brl(t.salary)}</dd>
+                    <dt>Serviços ({srvCount})</dt><dd className="text-right">{brl(t.billed)}</dd>
+                    <dt>Comissão devida</dt><dd className="text-right">{brl(t.commission)}</dd>
+                    <dt>Adiantamentos</dt><dd className="text-right">− {brl(t.advance)}</dd>
+                    <dt className="font-medium pt-2 border-t">Total líquido no período</dt><dd className="text-right font-medium pt-2 border-t">{brl(t.net)}</dd>
+                    <dt className="text-success">Já pago no período</dt><dd className="text-right text-success">− {brl(transfer.paidTotal)}</dd>
+                    <dt className="font-semibold pt-2 border-t">Falta repassar</dt>
+                    <dd className={`text-right font-semibold pt-2 border-t ${transfer.remaining > 0 ? "text-primary" : "text-success"}`}>
+                      {transfer.remaining > 0 ? brl(transfer.remaining) : "Quitado"}
+                    </dd>
+                  </dl>
                 </div>
-                <div className="flex items-center gap-3 pt-1">
-                  {editBtn(() => {
-                    setEditingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance });
-                    setStaffDialogOpen(true);
-                  })}
-                  {del(() =>
-                    setDeletingMember({ name: t.name, role: t.role, salary: t.salary, rate: t.rate, advance: t.advance }),
-                  )}
+                <div className="flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStaffFilter(isFocused ? "Todos" : t.name);
+                      if (!isFocused) setF((prev) => ({ ...prev, staff: t.name }));
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
+                  >
+                    {isFocused ? "Mostrar todas as profissionais" : "Ver só esta profissional"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openPayDialog({
+                        staff: t.name,
+                        kind: t.salary > 0 && t.commission > 0 ? "Comissão + Salário" : t.commission > 0 ? "Comissão" : "Salário",
+                        periodType: selectedMonth === "all" ? "Semana" : "Mês",
+                        periodDate: selectedMonth === "all" ? todayLocal() : `${selectedMonth}-01`,
+                        amount: transfer.remaining > 0 ? transfer.remaining : t.commission > 0 ? t.commission : t.salary,
+                      })
+                    }
+                    className={secondaryBtn}
+                  >
+                    <Wallet className="h-4 w-4 text-primary" />
+                    Registrar repasse
+                  </button>
                 </div>
               </div>
-              <dl className="grid grid-cols-2 gap-y-1 text-sm">
-                <dt>Salário base</dt><dd className="text-right">{brl(t.salary)}</dd>
-                <dt>Serviços realizados</dt><dd className="text-right">{brl(t.billed)}</dd>
-                <dt>Comissão devida</dt><dd className="text-right">{brl(t.commission)}</dd>
-                <dt>Adiantamentos</dt><dd className="text-right">− {brl(t.advance)}</dd>
-                <dt className="font-semibold pt-2 border-t">Líquido a pagar</dt><dd className="text-right font-semibold text-primary pt-2 border-t">{brl(t.net)}</dd>
-              </dl>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-      <h3 className="text-2xl font-semibold mb-3">Atendimentos e comissões</h3>
-      <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+
+      <h3 className="text-2xl font-semibold mb-3">
+        Atendimentos e comissões{activeStaffFilter !== "Todos" ? ` — ${activeStaffFilter}` : ""}
+      </h3>
+      <form onSubmit={add} className="rounded-xl border bg-card p-4 mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <input type="date" className={input} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <select className={input} value={selectedStaff} onChange={(e) => setF({ ...f, staff: e.target.value })}>
           {data.staff.length === 0 && <option value="">Cadastre um funcionário</option>}
@@ -1392,15 +1518,90 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
           )}
         </div>
       </form>
-      {indexedServices.length === 0 ? (
+
+      <div className="rounded-xl border bg-card p-4 mb-4 space-y-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 items-center">
+          <div className="relative sm:col-span-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="search"
+              aria-label="Pesquisar atendimentos"
+              className="w-full rounded-md border bg-background pl-9 pr-8 py-2 text-sm"
+              placeholder="Pesquisar cliente, serviço, profissional, data ou valor..."
+              value={serviceSearch}
+              onChange={(e) => setServiceSearch(e.target.value)}
+            />
+            {serviceSearch && (
+              <button
+                type="button"
+                aria-label="Limpar pesquisa de atendimentos"
+                onClick={() => setServiceSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">De:</span>
+            <input
+              type="date"
+              aria-label="Data inicial de atendimentos"
+              className={`${input} w-full`}
+              value={serviceDateFrom}
+              onChange={(e) => setServiceDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">Até:</span>
+            <input
+              type="date"
+              aria-label="Data final de atendimentos"
+              className={`${input} w-full`}
+              value={serviceDateTo}
+              onChange={(e) => setServiceDateTo(e.target.value)}
+            />
+          </label>
+          <div className="flex justify-end">
+            {hasServiceFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setServiceSearch("");
+                  setStaffFilter("Todos");
+                  setServiceDateFrom("");
+                  setServiceDateTo("");
+                }}
+                className={`${secondaryBtn} w-full lg:w-auto`}
+              >
+                <X className="h-4 w-4" />
+                Limpar filtros
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 border-t text-xs text-muted-foreground">
+          <span>
+            Atendimentos exibidos: <strong className="text-foreground">{periodServices.length}</strong>
+          </span>
+          <span>
+            Faturado: <strong className="text-foreground">{brl(filteredBilled)}</strong>
+          </span>
+          <span>
+            Comissão total: <strong className="text-primary">{brl(filteredCommission)}</strong>
+          </span>
+        </div>
+      </div>
+
+      {periodServices.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
-          Nenhum atendimento registrado neste período.
+          Nenhum atendimento encontrado para os filtros selecionados.
         </div>
       ) : (
         <Table
           stickyLast
           head={["Data", "Profissional", "Cliente", "Serviço", "Valor", "Comissão", "Ações"]}
-          rows={indexedServices.map(({ service: v, index }) => [
+          rows={periodServices.map(({ service: v, index }) => [
             fdate(v.date),
             v.staff,
             v.client,
@@ -1414,6 +1615,32 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
           ])}
         />
       )}
+
+      <TeamPayoutsSection
+        data={data}
+        setData={setData}
+        selectedMonth={selectedMonth}
+        selectedStaff={activeStaffFilter}
+        onOpenPay={openPayDialog}
+      />
+
+      <StaffPayoutDialog
+        open={payoutDialogOpen}
+        onOpenChange={setPayoutDialogOpen}
+        editing={null}
+        prefill={payoutPrefill}
+        staffNames={data.staff.map((x) => x.name)}
+        paymentMethods={paymentMethods}
+        onSave={(_id, payout, shouldSyncCash) => {
+          setData((d) => addStaffPayout(d, payout, shouldSyncCash));
+          toast.success(
+            shouldSyncCash
+              ? "Pagamento registrado e lançado no Fluxo de Caixa."
+              : "Pagamento registrado no histórico da equipe.",
+          );
+        }}
+      />
+
       <StaffDialog
         member={editingMember}
         open={staffDialogOpen}
@@ -1423,6 +1650,7 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
           if (originalName) {
             setData((d) => updateStaff(d, originalName, member));
             if (f.staff === originalName) setF((prev) => ({ ...prev, staff: member.name }));
+            if (staffFilter === originalName) setStaffFilter(member.name);
             toast.success("Funcionário atualizado.");
           } else {
             setData((d) => addStaff(d, member));
@@ -1467,6 +1695,7 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
         onConfirm={() => {
           if (!deletingMember) return;
           setData((d) => deleteStaff(d, deletingMember.name));
+          if (staffFilter === deletingMember.name) setStaffFilter("Todos");
           setDeletingMember(null);
           toast.success("Funcionário excluído.");
         }}

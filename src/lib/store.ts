@@ -7,12 +7,28 @@ export type Item = { code: string; name: string; category: string; min: number; 
 export type Service = { date: string; staff: string; client: string; service: string; amount: number; rate: number };
 export type Withdrawal = { id: string; date: string; description: string; amount: number; payment: string };
 export type Staff = { name: string; role: string; salary: number; rate: number; advance: number };
+export type PayoutKind = "Comissão" | "Salário" | "Comissão + Salário" | "Adiantamento";
+export type PayoutPeriodType = "Semana" | "Mês";
+export type StaffPayout = {
+  id: string;
+  date: string;
+  staff: string;
+  kind: PayoutKind;
+  periodType: PayoutPeriodType;
+  periodLabel: string;
+  periodStart?: string;
+  periodEnd?: string;
+  amount: number;
+  payment: string;
+  notes?: string;
+};
 export type Data = {
   transactions: Tx[];
   stock: Item[];
   services: Service[];
   withdrawals: Withdrawal[];
   staff: Staff[];
+  payouts?: StaffPayout[];
   safeRate: number;
   serviceGoal?: number;
   paymentMethods?: string[];
@@ -30,11 +46,12 @@ export const DEFAULT_PAYMENT_METHODS = [
 ];
 
 const initial: Data = {
-  ...(seed as Omit<Data, "staff" | "safeRate" | "serviceGoal" | "paymentMethods">),
+  ...(seed as Omit<Data, "staff" | "payouts" | "safeRate" | "serviceGoal" | "paymentMethods">),
   staff: [
     { name: "Camila Silva", role: "Cabeleireira & Colorista", salary: 1800, rate: 0.25, advance: 200 },
     { name: "Larissa Santos", role: "Manicure & Nail Designer", salary: 1500, rate: 0.3, advance: 150 },
   ],
+  payouts: [],
   safeRate: 0.5,
   serviceGoal: DEFAULT_SERVICE_GOAL,
   paymentMethods: DEFAULT_PAYMENT_METHODS,
@@ -42,6 +59,10 @@ const initial: Data = {
 
 export function getPaymentMethods(d: Data): string[] {
   return Array.isArray(d.paymentMethods) ? d.paymentMethods : DEFAULT_PAYMENT_METHODS;
+}
+
+export function getStaffPayouts(d: Data): StaffPayout[] {
+  return Array.isArray(d.payouts) ? d.payouts : [];
 }
 
 export function getServiceGoal(d: Data): number {
@@ -54,6 +75,7 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
   const services = Array.isArray(raw?.services) ? raw.services : initial.services;
   const withdrawals = Array.isArray(raw?.withdrawals) ? raw.withdrawals : initial.withdrawals;
   const staff = Array.isArray(raw?.staff) ? raw.staff : initial.staff;
+  const payouts = Array.isArray(raw?.payouts) ? raw.payouts : [];
   const safeRate = typeof raw?.safeRate === "number" ? raw.safeRate : initial.safeRate;
   const serviceGoal =
     typeof raw?.serviceGoal === "number" && raw.serviceGoal > 0 ? raw.serviceGoal : DEFAULT_SERVICE_GOAL;
@@ -63,7 +85,11 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
   } else {
     const seen = new Set(DEFAULT_PAYMENT_METHODS.map((m) => m.toLowerCase()));
     paymentMethods = [...DEFAULT_PAYMENT_METHODS];
-    for (const p of [...transactions.map((t) => t.payment), ...withdrawals.map((w) => w.payment)]) {
+    for (const p of [
+      ...transactions.map((t) => t.payment),
+      ...withdrawals.map((w) => w.payment),
+      ...payouts.map((po) => po.payment),
+    ]) {
       const trimmed = p?.trim();
       if (trimmed && !seen.has(trimmed.toLowerCase())) {
         seen.add(trimmed.toLowerCase());
@@ -71,7 +97,7 @@ export function normalizeData(raw: Partial<Data> | null | undefined): Data {
       }
     }
   }
-  return { transactions, stock, services, withdrawals, staff, safeRate, serviceGoal, paymentMethods };
+  return { transactions, stock, services, withdrawals, staff, payouts, safeRate, serviceGoal, paymentMethods };
 }
 
 export function installmentDetails(parcelled: boolean, months: string): Pick<Tx, "installmentMonthsRemaining"> {
@@ -497,11 +523,242 @@ export function updateStaff(d: Data, originalName: string, updated: Staff): Data
       nextName !== originalName
         ? d.services.map((v) => (v.staff === originalName ? { ...v, staff: nextName } : v))
         : d.services,
+    payouts:
+      nextName !== originalName
+        ? getStaffPayouts(d).map((p) => (p.staff === originalName ? { ...p, staff: nextName } : p))
+        : getStaffPayouts(d),
   };
 }
 
 export function deleteStaff(d: Data, name: string): Data {
   return { ...d, staff: d.staff.filter((s) => s.name !== name) };
+}
+
+export function addStaffPayout(
+  d: Data,
+  payout: Omit<StaffPayout, "id">,
+  syncCash = false,
+): Data {
+  const id = `PG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const entry: StaffPayout = {
+    id,
+    date: payout.date,
+    staff: payout.staff.trim(),
+    kind: payout.kind,
+    periodType: payout.periodType,
+    periodLabel: payout.periodLabel.trim(),
+    amount: Math.max(0, Number(payout.amount) || 0),
+    payment: payout.payment.trim(),
+    ...(payout.periodStart ? { periodStart: payout.periodStart } : {}),
+    ...(payout.periodEnd ? { periodEnd: payout.periodEnd } : {}),
+    ...(payout.notes?.trim() ? { notes: payout.notes.trim() } : {}),
+  };
+  const nextPayouts = [...getStaffPayouts(d), entry];
+  if (!syncCash || !(entry.amount > 0)) {
+    return { ...d, payouts: nextPayouts };
+  }
+  const category = entry.kind === "Salário" ? "Despesas Fixas" : "Comissão";
+  const desc = `${entry.kind} - ${entry.staff} (${entry.periodLabel})`;
+  return {
+    ...d,
+    payouts: nextPayouts,
+    transactions: [
+      ...d.transactions,
+      {
+        id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`,
+        date: entry.date,
+        type: "Saída",
+        category,
+        description: desc,
+        amount: entry.amount,
+        payment: entry.payment,
+        status: "Pago",
+      },
+    ],
+  };
+}
+
+export function updateStaffPayout(d: Data, id: string, updated: Omit<StaffPayout, "id">): Data {
+  const entry: StaffPayout = {
+    id,
+    date: updated.date,
+    staff: updated.staff.trim(),
+    kind: updated.kind,
+    periodType: updated.periodType,
+    periodLabel: updated.periodLabel.trim(),
+    amount: Math.max(0, Number(updated.amount) || 0),
+    payment: updated.payment.trim(),
+    ...(updated.periodStart ? { periodStart: updated.periodStart } : {}),
+    ...(updated.periodEnd ? { periodEnd: updated.periodEnd } : {}),
+    ...(updated.notes?.trim() ? { notes: updated.notes.trim() } : {}),
+  };
+  return {
+    ...d,
+    payouts: getStaffPayouts(d).map((p) => (p.id === id ? entry : p)),
+  };
+}
+
+export function deleteStaffPayout(d: Data, id: string): Data {
+  return {
+    ...d,
+    payouts: getStaffPayouts(d).filter((p) => p.id !== id),
+  };
+}
+
+export function getWeekBounds(dateStr: string): { start: string; end: string; label: string } {
+  const parts = dateStr.split("-").map(Number);
+  const year = parts[0] ?? new Date().getFullYear();
+  const month = (parts[1] ?? 1) - 1;
+  const day = parts[2] ?? 1;
+  const dt = new Date(year, month, day);
+  const dow = dt.getDay(); // 0=Sun, 1=Mon, ...
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(year, month, day + diffToMon);
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  const fmtIso = (x: Date) =>
+    `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  const fmtBrShort = (x: Date) =>
+    `${String(x.getDate()).padStart(2, "0")}/${String(x.getMonth() + 1).padStart(2, "0")}`;
+  const start = fmtIso(monday);
+  const end = fmtIso(sunday);
+  const label = `${fmtBrShort(monday)} a ${fmtBrShort(sunday)}/${sunday.getFullYear()}`;
+  return { start, end, label };
+}
+
+export type ServiceFilters = {
+  query?: string | undefined;
+  staff?: string | undefined;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+};
+
+export function filterIndexedServices(
+  services: Service[],
+  filters: ServiceFilters,
+): { service: Service; index: number }[] {
+  const q = filters.query ? normalizeSearch(filters.query.trim()) : "";
+  const staff = filters.staff && filters.staff !== "Todos" ? filters.staff : "";
+  const dateFrom = filters.dateFrom?.trim() ?? "";
+  const dateTo = filters.dateTo?.trim() ?? "";
+
+  return services
+    .map((service, index) => ({ service, index }))
+    .filter(({ service: s }) => {
+      if (staff && s.staff !== staff) return false;
+      if (dateFrom && s.date < dateFrom) return false;
+      if (dateTo && s.date > dateTo) return false;
+      if (q) {
+        const haystack = normalizeSearch(
+          `${s.staff} ${s.client} ${s.service} ${s.date} ${fdate(s.date)} ${s.amount} ${brl(s.amount)}`,
+        );
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => b.service.date.localeCompare(a.service.date));
+}
+
+export type WeeklyCommissionRow = {
+  key: string;
+  weekStart: string;
+  weekEnd: string;
+  label: string;
+  staff: string;
+  count: number;
+  billed: number;
+  commission: number;
+  paid: number;
+  remaining: number;
+  status: "Pago" | "Parcial" | "Pendente";
+};
+
+export function weeklyCommissionBreakdown(
+  services: Service[],
+  payouts: StaffPayout[],
+  staffFilter?: string | undefined,
+): WeeklyCommissionRow[] {
+  const filteredServices =
+    staffFilter && staffFilter !== "Todos"
+      ? services.filter((s) => s.staff === staffFilter)
+      : services;
+
+  const map = new Map<
+    string,
+    { weekStart: string; weekEnd: string; label: string; staff: string; count: number; billed: number; commission: number }
+  >();
+
+  for (const s of filteredServices) {
+    const wb = getWeekBounds(s.date);
+    const key = `${wb.start}__${s.staff}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.billed += s.amount;
+      existing.commission += s.amount * s.rate;
+    } else {
+      map.set(key, {
+        weekStart: wb.start,
+        weekEnd: wb.end,
+        label: wb.label,
+        staff: s.staff,
+        count: 1,
+        billed: s.amount,
+        commission: s.amount * s.rate,
+      });
+    }
+  }
+
+  const rows: WeeklyCommissionRow[] = [];
+  for (const [key, entry] of map.entries()) {
+    const paid = payouts
+      .filter((p) => {
+        if (p.staff !== entry.staff) return false;
+        if (p.kind !== "Comissão" && p.kind !== "Comissão + Salário") return false;
+        if (p.periodType !== "Semana") return false;
+        if (p.periodStart) return p.periodStart === entry.weekStart;
+        if (p.periodLabel === entry.label) return true;
+        return p.date >= entry.weekStart && p.date <= entry.weekEnd;
+      })
+      .reduce((acc, p) => acc + p.amount, 0);
+    const remaining = Math.max(0, Number((entry.commission - paid).toFixed(2)));
+    const status: WeeklyCommissionRow["status"] =
+      paid >= entry.commission - 0.01 && entry.commission > 0
+        ? "Pago"
+        : paid > 0
+          ? "Parcial"
+          : "Pendente";
+    rows.push({
+      key,
+      ...entry,
+      paid,
+      remaining,
+      status,
+    });
+  }
+
+  return rows.sort((a, b) => b.weekStart.localeCompare(a.weekStart) || a.staff.localeCompare(b.staff));
+}
+
+export function payoutsInPeriod(payouts: StaffPayout[], yearMonth: string): StaffPayout[] {
+  if (!yearMonth || yearMonth === "all") return payouts;
+  return payouts.filter((p) => {
+    if (p.periodStart && p.periodStart.startsWith(yearMonth)) return true;
+    if (p.periodEnd && p.periodEnd.startsWith(yearMonth)) return true;
+    return p.date.startsWith(yearMonth);
+  });
+}
+
+export function staffTransferTotals(staffName: string, net: number, payouts: StaffPayout[]) {
+  const mine = payouts.filter((p) => p.staff === staffName);
+  const paidCommission = mine
+    .filter((p) => p.kind === "Comissão")
+    .reduce((a, p) => a + p.amount, 0);
+  const paidSalary = mine
+    .filter((p) => p.kind === "Salário")
+    .reduce((a, p) => a + p.amount, 0);
+  const paidTotal = mine.reduce((a, p) => a + p.amount, 0);
+  const remaining = Math.max(0, Number((net - paidTotal).toFixed(2)));
+  return { paidCommission, paidSalary, paidTotal, remaining, count: mine.length };
 }
 
 export function addPaymentMethod(d: Data, name: string): Data {
@@ -528,6 +785,10 @@ export function updatePaymentMethod(d: Data, originalName: string, newName: stri
       trimmed !== originalName
         ? d.withdrawals.map((w) => (w.payment === originalName ? { ...w, payment: trimmed } : w))
         : d.withdrawals,
+    payouts:
+      trimmed !== originalName
+        ? getStaffPayouts(d).map((p) => (p.payment === originalName ? { ...p, payment: trimmed } : p))
+        : getStaffPayouts(d),
   };
 }
 
@@ -678,6 +939,7 @@ export function availableMonths(d: Data): string[] {
     ...d.transactions.map((t) => t.date),
     ...d.services.map((s) => s.date),
     ...d.withdrawals.map((w) => w.date),
+    ...getStaffPayouts(d).map((p) => p.periodStart ?? p.date),
   ]) {
     if (/^\d{4}-\d{2}/.test(date)) set.add(date.slice(0, 7));
   }
@@ -705,6 +967,7 @@ export function scopeDataByMonth(d: Data, yearMonth: string): Data {
     transactions: d.transactions.filter((t) => t.date.startsWith(yearMonth)),
     services: d.services.filter((s) => s.date.startsWith(yearMonth)),
     withdrawals: d.withdrawals.filter((w) => w.date.startsWith(yearMonth)),
+    payouts: payoutsInPeriod(getStaffPayouts(d), yearMonth),
   };
 }
 
