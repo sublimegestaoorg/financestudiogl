@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { toCsv } from "@/lib/export";
 import {
   DEFAULT_PAYMENT_METHODS,
   addPaymentMethod,
@@ -20,8 +21,10 @@ import {
   nextStockCode,
   normalizeData,
   parseBatchTransactions,
+  recordStockPurchase,
   scopeDataByMonth,
   summary,
+  todayLocal,
   toggleTransactionPaid,
   updatePaymentMethod,
   updateService,
@@ -336,5 +339,72 @@ via Cartão Crédito
       amount: 85.5,
       payment: "Dinheiro",
     });
+
+    const inlineNoSymbol = parseBatchTransactions("Escova Maria - 80,00", {
+      date: "2026-11-03",
+      type: "Entrada",
+      category: "Serviços",
+      payment: "PIX",
+      status: "Concluído",
+      categories: ["Serviços"],
+      paymentMethods: [...DEFAULT_PAYMENT_METHODS],
+    });
+    expect(inlineNoSymbol[0]).toMatchObject({
+      description: "Escova Maria",
+      amount: 80,
+    });
+  });
+
+  it("registra compra de estoque atualizando quantidade, custo e lançando saída no caixa", () => {
+    const d0: Data = {
+      ...base,
+      stock: [{ code: "EST-001", name: "Coloração Wella", category: "Colorimetria", min: 5, qty: 2, cost: 40 }],
+    };
+    const d1 = recordStockPurchase(d0, {
+      code: "EST-001",
+      qty: 6,
+      unitCost: 45,
+      date: "2026-11-24",
+      payment: "PIX",
+      syncCash: true,
+    });
+    expect(d1.stock[0]?.qty).toBe(8);
+    expect(d1.stock[0]?.cost).toBe(45);
+    expect(d1.transactions).toHaveLength(1);
+    expect(d1.transactions[0]).toMatchObject({
+      type: "Saída",
+      category: "Insumos/Produtos",
+      amount: 270,
+      payment: "PIX",
+      status: "Pago",
+    });
+
+    const d2 = recordStockPurchase(d1, {
+      code: "EST-001",
+      qty: 2,
+      unitCost: 45,
+      date: "2026-11-24",
+      payment: "PIX",
+      syncCash: false,
+    });
+    expect(d2.stock[0]?.qty).toBe(10);
+    expect(d2.transactions).toHaveLength(1);
+  });
+
+  it("formata data local corretamente, zera teto de pró-labore em prejuízo e gera CSV com BOM", () => {
+    expect(todayLocal(new Date(2026, 10, 23, 23, 45, 0))).toBe("2026-11-23");
+
+    const loss = summary({
+      ...base,
+      transactions: [
+        { id: "1", date: "2026-11-01", type: "Saída", category: "Despesas Fixas", description: "Aluguel", amount: 500, payment: "PIX", status: "Pago" },
+      ],
+    });
+    expect(loss.profit).toBe(-500);
+    expect(loss.ceiling).toBe(0);
+
+    const csv = toCsv(["Descrição", "Valor"], [['Kit "Luxo"; 1L', "120,00"]]);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain('"Kit ""Luxo""; 1L";120,00');
   });
 });

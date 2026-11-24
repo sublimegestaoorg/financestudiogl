@@ -19,9 +19,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { installmentDetails, nextStockCode, type Item, type Service, type Staff, type Tx, type Withdrawal } from "@/lib/store";
+import { brl, installmentDetails, nextStockCode, todayLocal, type Item, type Service, type Staff, type Tx, type Withdrawal } from "@/lib/store";
 import { InstallmentFields } from "@/components/studio/installment-fields";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export const TX_CATEGORIES = [
   "Serviços",
@@ -893,6 +894,136 @@ export function WithdrawalEditDialog({
             </button>
             <button type="submit" className={primaryBtn}>
               Salvar alterações
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function StockPurchaseDialog({
+  item,
+  open,
+  onOpenChange,
+  paymentMethods,
+  onConfirm,
+}: {
+  item: Item | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  paymentMethods: string[];
+  onConfirm: (params: {
+    code: string;
+    qty: number;
+    unitCost: number;
+    date: string;
+    payment: string;
+    syncCash: boolean;
+  }) => void;
+}) {
+  const [date, setDate] = useState(() => todayLocal());
+  const [qty, setQty] = useState("1");
+  const [unitCost, setUnitCost] = useState("0");
+  const [payment, setPayment] = useState(() => paymentMethods[0] ?? "PIX");
+  const [syncCash, setSyncCash] = useState(true);
+
+  useEffect(() => {
+    if (open && item) {
+      setDate(todayLocal());
+      setQty(String(Math.max(1, item.min * 2 - item.qty)));
+      setUnitCost(String(item.cost));
+      setPayment(paymentMethods[0] ?? "PIX");
+      setSyncCash(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item]);
+
+  const effectivePayment = paymentMethods.includes(payment) ? payment : (paymentMethods[0] ?? "PIX");
+  const parsedQty = Math.max(0, Number(qty) || 0);
+  const parsedCost = Math.max(0, Number(unitCost) || 0);
+  const total = parsedQty * parsedCost;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!item) return;
+    if (!(parsedQty >= 1 && Number.isInteger(parsedQty))) {
+      toast.error("Informe uma quantidade inteira maior que zero.");
+      return;
+    }
+    if (Number.isNaN(parsedCost) || parsedCost < 0) {
+      toast.error("O custo unitário não pode ser negativo.");
+      return;
+    }
+    if (syncCash && !effectivePayment) {
+      toast.error("Selecione uma forma de pagamento.");
+      return;
+    }
+    onConfirm({
+      code: item.code,
+      qty: parsedQty,
+      unitCost: parsedCost,
+      date,
+      payment: effectivePayment,
+      syncCash,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Registrar compra de estoque</DialogTitle>
+          <DialogDescription>
+            {item
+              ? `Repor "${item.name}" (atual: ${item.qty} un. / mínimo: ${item.min} un.).`
+              : "Atualize o estoque e lance a despesa de insumos."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className={labelClass} htmlFor="buy-date">Data</label>
+              <input id="buy-date" type="date" className={fieldClass} value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="buy-qty">Qtd. comprada</label>
+              <input id="buy-qty" type="number" min="1" step="1" className={fieldClass} value={qty} onChange={(e) => setQty(e.target.value)} required />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="buy-cost">Custo un. (R$)</label>
+              <input id="buy-cost" type="number" min="0" step="0.01" className={fieldClass} value={unitCost} onChange={(e) => setUnitCost(e.target.value)} required />
+            </div>
+          </div>
+          <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm flex items-center justify-between">
+            <span className="text-muted-foreground">Total da compra</span>
+            <strong className="text-foreground">{brl(total)}</strong>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Checkbox id="buy-sync-cash" checked={syncCash} onCheckedChange={(c) => setSyncCash(c === true)} />
+              <label htmlFor="buy-sync-cash" className="text-sm cursor-pointer">
+                Lançar saída em Insumos/Produtos no Fluxo de Caixa
+              </label>
+            </div>
+            {syncCash && (
+              <div>
+                <label className={labelClass} htmlFor="buy-payment">Forma de pagamento</label>
+                <select id="buy-payment" className={fieldClass} value={effectivePayment} onChange={(e) => setPayment(e.target.value)}>
+                  {paymentMethods.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <button type="button" className={secondaryBtn} onClick={() => onOpenChange(false)}>
+              Cancelar
+            </button>
+            <button type="submit" className={primaryBtn}>
+              Confirmar compra
             </button>
           </DialogFooter>
         </form>

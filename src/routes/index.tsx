@@ -1,6 +1,26 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Calendar, Check, CheckCircle2, Copy, CreditCard, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import {
+  Calendar,
+  Check,
+  CheckCircle2,
+  Cloud,
+  CloudOff,
+  Copy,
+  CreditCard,
+  Download,
+  Loader2,
+  Moon,
+  Pencil,
+  Plus,
+  Printer,
+  Search,
+  ShoppingBag,
+  Sun,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
@@ -9,6 +29,7 @@ import { InstallmentFields } from "@/components/studio/installment-fields";
 import { BatchImportDialog } from "@/components/studio/batch-import";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { downloadCsv, printReport } from "@/lib/export";
 import {
   addStaff,
   addStockItem,
@@ -28,8 +49,10 @@ import {
   installmentDetails,
   monthly,
   pct,
+  recordStockPurchase,
   scopeDataByMonth,
   summary,
+  todayLocal,
   toggleTransactionPaid,
   updateService,
   updateStaff,
@@ -39,6 +62,7 @@ import {
   useStore,
   type Data,
   type Item,
+  type SaveStatus,
   type Service,
   type Staff,
   type Tx,
@@ -49,6 +73,7 @@ import {
   ServiceEditDialog,
   StaffDialog,
   StockItemDialog,
+  StockPurchaseDialog,
   TX_CATEGORIES,
   TX_STATUSES,
   TransactionEditDialog,
@@ -141,10 +166,71 @@ function Login() {
   );
 }
 
+const THEME_KEY = "geisa-lorena-theme";
+
+function useTheme() {
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      const isDark = saved === "dark";
+      setDark(isDark);
+      document.documentElement.classList.toggle("dark", isDark);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggle = () => {
+    setDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      try {
+        localStorage.setItem(THEME_KEY, next ? "dark" : "light");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+  return { dark, toggle };
+}
+
+function SyncBadge({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {
+  if (status === "idle") return null;
+  if (status === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Salvando…
+      </span>
+    );
+  }
+  if (status === "error") {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/20 cursor-pointer"
+      >
+        <CloudOff className="h-3.5 w-3.5" />
+        Erro ao salvar · Tentar novamente
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+      <Cloud className="h-3.5 w-3.5 text-success" />
+      Salvo na nuvem
+    </span>
+  );
+}
+
 function Studio({ userId }: { userId: string }) {
-  const { data, setData, reset, ready } = useStore(userId);
+  const { data, setData, reset, ready, loadError, saveStatus, retryLoad, retrySave } = useStore(userId);
+  const { dark, toggle: toggleTheme } = useTheme();
   const [tab, setTab] = useState<Tab>("Painel");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const [resetOpen, setResetOpen] = useState(false);
   const months = availableMonths(data);
   const effectiveMonth =
     selectedMonth === "all" || (selectedMonth && months.includes(selectedMonth))
@@ -161,25 +247,64 @@ function Studio({ userId }: { userId: string }) {
         <nav className="order-last md:order-none w-full flex md:flex-col gap-1 overflow-x-auto md:mt-6">
           {TABS.map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`text-left whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${tab === t ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium" : "hover:bg-sidebar-accent"}`}>
+              className={`text-left whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors cursor-pointer ${tab === t ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium" : "hover:bg-sidebar-accent"}`}>
               {t}
             </button>
           ))}
         </nav>
-        <div className="hidden md:flex mt-auto flex-col gap-2 items-start">
-          <button onClick={() => confirm("Restaurar dados originais das planilhas?") && reset()} className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground text-left">Restaurar dados da planilha</button>
-          <button onClick={() => supabase.auth.signOut()} className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground text-left">Sair</button>
+        <div className="hidden md:flex mt-auto flex-col gap-2.5 items-start w-full">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="inline-flex items-center gap-2 text-xs text-sidebar-foreground/80 hover:text-sidebar-foreground cursor-pointer"
+          >
+            {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            {dark ? "Modo claro" : "Modo escuro"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setResetOpen(true)}
+            className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground text-left cursor-pointer"
+          >
+            Restaurar dados da planilha
+          </button>
+          <button type="button" onClick={() => supabase.auth.signOut()} className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground text-left cursor-pointer">
+            Sair
+          </button>
         </div>
-        <button onClick={() => supabase.auth.signOut()} className="md:hidden ml-auto text-xs whitespace-nowrap">Sair</button>
+        <div className="md:hidden ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            aria-label={dark ? "Ativar modo claro" : "Ativar modo escuro"}
+            onClick={toggleTheme}
+            className="p-1.5 rounded-md hover:bg-sidebar-accent cursor-pointer"
+          >
+            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+          <button type="button" onClick={() => supabase.auth.signOut()} className="text-xs whitespace-nowrap cursor-pointer">
+            Sair
+          </button>
+        </div>
       </aside>
       <main className="flex-1 min-w-0 p-5 md:p-10 max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-          <h2 className="text-4xl font-semibold">{tab}</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-4xl font-semibold">{tab}</h2>
+            {ready && <SyncBadge status={saveStatus} onRetry={retrySave} />}
+          </div>
           {ready && (tab === "Painel" || tab === "Equipe" || tab === "Pró-Labore") && (
             <MonthPicker months={months} value={effectiveMonth} onChange={setSelectedMonth} />
           )}
         </div>
-        {!ready && <p className="text-muted-foreground">Carregando seus dados…</p>}
+        {loadError && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-5 mb-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-destructive font-medium">{loadError}</p>
+            <button type="button" onClick={retryLoad} className={btn}>
+              Tentar novamente
+            </button>
+          </div>
+        )}
+        {!ready && !loadError && <p className="text-muted-foreground">Carregando seus dados…</p>}
         {ready && <>
         {tab === "Painel" && <Dashboard data={data} setData={setData} selectedMonth={effectiveMonth} />}
         {tab === "Fluxo de Caixa" && <Cash data={data} setData={setData} />}
@@ -190,6 +315,16 @@ function Studio({ userId }: { userId: string }) {
         {tab === "Anual" && <Annual data={data} />}
         </>}
       </main>
+      <ConfirmDeleteDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        title="Restaurar dados originais da planilha?"
+        description="Todos os seus lançamentos, estoque, equipe e configurações atuais serão substituídos pelos dados iniciais de exemplo."
+        onConfirm={() => {
+          reset();
+          toast.success("Dados restaurados para o padrão da planilha.");
+        }}
+      />
     </div>
   );
 }
@@ -371,7 +506,7 @@ function Cash({ data, setData }: Props) {
   const [parcelled, setParcelled] = useState(false);
   const [months, setMonths] = useState("");
   const [f, setF] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocal(),
     type: "Entrada" as Tx["type"],
     category: "Serviços",
     description: "",
@@ -591,6 +726,59 @@ function Cash({ data, setData }: Props) {
               <CreditCard className="h-4 w-4" />
               Formas de pagamento
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                downloadCsv(
+                  `fluxo-de-caixa-${todayLocal()}.csv`,
+                  ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Status", "Meses restantes"],
+                  list.map((t) => [
+                    fdate(t.date),
+                    t.type,
+                    t.category,
+                    t.description,
+                    t.amount.toFixed(2).replace(".", ","),
+                    t.payment,
+                    t.status,
+                    t.installmentMonthsRemaining ?? "",
+                  ]),
+                );
+                toast.success("CSV exportado.");
+              }}
+              className={secondaryBtn}
+            >
+              <Download className="h-4 w-4" />
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const ok = printReport({
+                  title: "Fluxo de Caixa",
+                  subtitle: hasActiveFilters ? "Relatório com filtros aplicados" : "Todos os lançamentos",
+                  kpis: [
+                    { label: "Entradas", value: brl(filteredIn) },
+                    { label: "Saídas", value: brl(filteredOut) },
+                    { label: "Saldo", value: brl(filteredIn - filteredOut) },
+                  ],
+                  headers: ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Pagamento", "Status"],
+                  rows: list.map((t) => [
+                    fdate(t.date),
+                    t.type,
+                    t.category,
+                    t.description,
+                    brl(t.amount),
+                    t.payment,
+                    t.status,
+                  ]),
+                });
+                if (!ok) toast.error("Permita pop-ups para imprimir ou salvar em PDF.");
+              }}
+              className={secondaryBtn}
+            >
+              <Printer className="h-4 w-4" />
+              PDF
+            </button>
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6 items-center">
@@ -736,8 +924,10 @@ function Cash({ data, setData }: Props) {
 }
 
 function Stock({ data, setData }: Props) {
+  const paymentMethods = getPaymentMethods(data);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [buyingItem, setBuyingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todas");
@@ -779,6 +969,49 @@ function Stock({ data, setData }: Props) {
     }
   };
 
+  const exportStockCsv = () => {
+    downloadCsv(
+      `estoque-${todayLocal()}.csv`,
+      ["Código", "Item", "Categoria", "Mínimo", "Atual", "Custo un.", "Total", "Status", "Comprar"],
+      visibleStock.map((i) => [
+        i.code,
+        i.name,
+        i.category,
+        i.min,
+        i.qty,
+        i.cost.toFixed(2).replace(".", ","),
+        (i.qty * i.cost).toFixed(2).replace(".", ","),
+        i.qty <= i.min ? "Repor urgente" : "Regular",
+        Math.max(0, i.min * 2 - i.qty),
+      ]),
+    );
+    toast.success("CSV do estoque exportado.");
+  };
+
+  const printStockPdf = () => {
+    const ok = printReport({
+      title: "Estoque",
+      subtitle: hasFilters ? "Itens filtrados" : "Inventário completo",
+      kpis: [
+        { label: "Valor em estoque", value: brl(s.stockValue) },
+        { label: "Itens exibidos", value: String(visibleStock.length) },
+        { label: "Repor urgente", value: String(s.critical) },
+      ],
+      headers: ["Código", "Item", "Categoria", "Mín.", "Atual", "Custo un.", "Total", "Comprar"],
+      rows: visibleStock.map((i) => [
+        i.code,
+        i.name,
+        i.category,
+        i.min,
+        i.qty,
+        brl(i.cost),
+        brl(i.qty * i.cost),
+        Math.max(0, i.min * 2 - i.qty),
+      ]),
+    });
+    if (!ok) toast.error("Permita pop-ups para imprimir ou salvar em PDF.");
+  };
+
   return (
     <>
       <Grid>
@@ -798,6 +1031,14 @@ function Stock({ data, setData }: Props) {
           >
             <Copy className="h-4 w-4" />
             Copiar lista de compras
+          </button>
+          <button type="button" onClick={exportStockCsv} className={secondaryBtn}>
+            <Download className="h-4 w-4" />
+            CSV
+          </button>
+          <button type="button" onClick={printStockPdf} className={secondaryBtn}>
+            <Printer className="h-4 w-4" />
+            PDF
           </button>
           <button type="button" onClick={openNew} className={btn}>
             <Plus className="h-4 w-4" />
@@ -886,12 +1127,34 @@ function Stock({ data, setData }: Props) {
             i.qty <= i.min ? <span className="text-destructive font-medium">Repor urgente</span> : <span className="text-success">Regular</span>,
             Math.max(0, i.min * 2 - i.qty),
             <span className="inline-flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setBuyingItem(i)}
+                className="inline-flex items-center gap-1 text-success text-xs hover:underline cursor-pointer"
+              >
+                <ShoppingBag className="h-3.5 w-3.5" />
+                Comprar
+              </button>
               {editBtn(() => openEdit(i))}
               {del(() => setDeletingItem(i))}
             </span>,
           ])}
         />
       )}
+      <StockPurchaseDialog
+        item={buyingItem}
+        open={Boolean(buyingItem)}
+        onOpenChange={(open) => !open && setBuyingItem(null)}
+        paymentMethods={paymentMethods}
+        onConfirm={(params) => {
+          setData((d) => recordStockPurchase(d, params));
+          toast.success(
+            params.syncCash
+              ? "Compra registrada no estoque e lançada no Fluxo de Caixa."
+              : "Quantidade adicionada ao estoque.",
+          );
+        }}
+      />
       <StockItemDialog
         item={editingItem}
         open={dialogOpen}
@@ -928,7 +1191,7 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
   const scoped = scopeDataByMonth(data, selectedMonth);
   const s = summary(scoped);
   const paymentMethods = getPaymentMethods(data);
-  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
+  const [f, setF] = useState({ date: todayLocal(), staff: data.staff[0]?.name ?? "", client: "", service: "", amount: "" });
   const [syncCash, setSyncCash] = useState(false);
   const [cashPayment, setCashPayment] = useState(paymentMethods[0] ?? "PIX");
   const [staffDialogOpen, setStaffDialogOpen] = useState(false);
@@ -996,19 +1259,74 @@ function Team({ data, setData, selectedMonth }: Props & { selectedMonth: string 
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-2xl font-semibold">Profissionais</h3>
-        <button
-          type="button"
-          onClick={() => {
-            setEditingMember(null);
-            setStaffDialogOpen(true);
-          }}
-          className={btn}
-        >
-          <Plus className="h-4 w-4" />
-          Novo funcionário
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              downloadCsv(
+                `folha-equipe-${selectedMonth === "all" ? "todos" : selectedMonth}.csv`,
+                ["Profissional", "Cargo", "Salário base", "Comissão %", "Serviços realizados", "Comissão devida", "Adiantamentos", "Líquido a pagar"],
+                s.team.map((t) => [
+                  t.name,
+                  t.role,
+                  t.salary.toFixed(2).replace(".", ","),
+                  (t.rate * 100).toFixed(1).replace(".", ","),
+                  t.billed.toFixed(2).replace(".", ","),
+                  t.commission.toFixed(2).replace(".", ","),
+                  t.advance.toFixed(2).replace(".", ","),
+                  t.net.toFixed(2).replace(".", ","),
+                ]),
+              );
+              toast.success("CSV da folha exportado.");
+            }}
+            className={secondaryBtn}
+          >
+            <Download className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const ok = printReport({
+                title: "Folha da Equipe",
+                subtitle: selectedMonth === "all" ? "Todos os períodos" : formatYearMonth(selectedMonth),
+                kpis: [
+                  { label: "Total da folha", value: brl(s.payroll) },
+                  { label: "Profissionais", value: String(s.team.length) },
+                  { label: "Atendimentos no período", value: String(indexedServices.length) },
+                ],
+                headers: ["Profissional", "Cargo", "Salário base", "Serviços", "Comissão", "Adiantamentos", "Líquido"],
+                rows: s.team.map((t) => [
+                  t.name,
+                  t.role,
+                  brl(t.salary),
+                  brl(t.billed),
+                  brl(t.commission),
+                  brl(t.advance),
+                  brl(t.net),
+                ]),
+              });
+              if (!ok) toast.error("Permita pop-ups para imprimir ou salvar em PDF.");
+            }}
+            className={secondaryBtn}
+          >
+            <Printer className="h-4 w-4" />
+            PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingMember(null);
+              setStaffDialogOpen(true);
+            }}
+            className={btn}
+          >
+            <Plus className="h-4 w-4" />
+            Novo funcionário
+          </button>
+        </div>
       </div>
       {s.team.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground mb-8">
@@ -1164,7 +1482,7 @@ function ProLabore({ data, setData, selectedMonth }: Props & { selectedMonth: st
   const defaultPayment = paymentMethods.includes("PIX Transferência")
     ? "PIX Transferência"
     : (paymentMethods[0] ?? "");
-  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), description: "", amount: "", payment: defaultPayment });
+  const [f, setF] = useState({ date: todayLocal(), description: "", amount: "", payment: defaultPayment });
   const [paymentsOpen, setPaymentsOpen] = useState(false);
   const [editingRate, setEditingRate] = useState(false);
   const [rateInput, setRateInput] = useState(String(Math.round(data.safeRate * 100)));
@@ -1324,10 +1642,11 @@ function ProLabore({ data, setData, selectedMonth }: Props & { selectedMonth: st
 function PaymentMethodsTab({ data, setData }: Props) {
   const methods = getPaymentMethods(data);
   const s = summary(data);
+  const activeTransactions = data.transactions.filter((t) => t.status !== "Cancelado");
   const counts = methods.map((m) => ({
     name: m,
     count:
-      data.transactions.filter((t) => t.payment === m).length +
+      activeTransactions.filter((t) => t.payment === m).length +
       data.withdrawals.filter((w) => w.payment === m).length,
   }));
   const top = [...counts].sort((a, b) => b.count - a.count)[0];

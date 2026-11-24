@@ -14,6 +14,7 @@ import {
   brl,
   fdate,
   parseBatchTransactions,
+  todayLocal,
   type ParsedBatchTx,
   type Tx,
 } from "@/lib/store";
@@ -36,7 +37,7 @@ export function BatchImportDialog({
   paymentMethods: string[];
   onImport: (items: ParsedBatchTx[]) => void;
 }) {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocal());
   const [type, setType] = useState<Tx["type"]>("Entrada");
   const [category, setCategory] = useState("Serviços");
   const [payment, setPayment] = useState(() => paymentMethods[0] ?? "PIX");

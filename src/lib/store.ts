@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import seed from "@/data/seed.json";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -343,10 +343,14 @@ export function parseBatchTransactions(text: string, defaults: BatchImportDefaul
           }
         }
 
-        // Fallback: single line with trailing value like "Escova - Ana R$ 80,00"
-        const inlineAmount = /([+-]?\s*R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*R\$\s*\d+(?:[.,]\d{1,2})?)\s*$/i.exec(line);
+        // Fallback: single line with trailing value like "Escova - Ana R$ 80,00" or "Escova Maria - 80,00"
+        const inlineAmount =
+          /([+-]?\s*R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*R\$\s*\d+(?:[.,]\d{1,2})?|(?:[-–—:]\s*|[+-]\s*|\s+)([+-]?\d{1,3}(?:\.\d{3})*,\d{2}))\s*$/i.exec(
+            line,
+          );
         if (inlineAmount?.[1] && amount === 0) {
-          const parsedVal = parseBrAmount(inlineAmount[1]);
+          const valText = inlineAmount[2] ?? inlineAmount[1];
+          const parsedVal = parseBrAmount(valText);
           if (parsedVal) {
             amount = parsedVal.amount;
             if (parsedVal.sign === "+") type = "Entrada";
@@ -425,6 +429,47 @@ export function deleteStockItem(d: Data, code: string): Data {
   return { ...d, stock: d.stock.filter((i) => i.code !== code) };
 }
 
+export function recordStockPurchase(
+  d: Data,
+  params: {
+    code: string;
+    qty: number;
+    unitCost: number;
+    date: string;
+    payment: string;
+    syncCash: boolean;
+  },
+): Data {
+  const target = d.stock.find((i) => i.code === params.code);
+  if (!target) return d;
+  const qty = Math.max(1, Math.floor(params.qty));
+  const unitCost = Math.max(0, Number(params.unitCost) || 0);
+  const nextStock = d.stock.map((i) =>
+    i.code === params.code ? { ...i, qty: i.qty + qty, cost: unitCost } : i,
+  );
+  if (!params.syncCash || !(qty * unitCost > 0)) {
+    return { ...d, stock: nextStock };
+  }
+  const total = Number((qty * unitCost).toFixed(2));
+  return {
+    ...d,
+    stock: nextStock,
+    transactions: [
+      ...d.transactions,
+      {
+        id: `TR-${String(d.transactions.length + 1).padStart(3, "0")}-${Date.now() % 1000}`,
+        date: params.date,
+        type: "Saída",
+        category: "Insumos/Produtos",
+        description: `Compra estoque: ${target.name} (${qty} un.)`,
+        amount: total,
+        payment: params.payment,
+        status: "Pago",
+      },
+    ],
+  };
+}
+
 export function addStaff(d: Data, member: Staff): Data {
   const next: Staff = {
     name: member.name.trim(),
@@ -492,35 +537,135 @@ export function deletePaymentMethod(d: Data, name: string): Data {
 
 const KEY = "geisa-lorena-financas-v1";
 
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+export function todayLocal(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function useStore(userId: string) {
-  const [data, setData] = useState<Data>(initial);
+  const [data, setDataState] = useState<Data>(initial);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [reloadTick, setReloadTick] = useState(0);
+  const dirtyRef = useRef(false);
+  const latestDataRef = useRef<Data>(initial);
+  latestDataRef.current = data;
+
+  const setData = useCallback((updater: Data | ((prev: Data) => Data)) => {
+    dirtyRef.current = true;
+    setSaveStatus("saving");
+    setDataState(updater);
+  }, []);
+
+  const persistToCloud = useCallback(
+    async (snapshot: Data) => {
+      setSaveStatus("saving");
+      try {
+        localStorage.setItem(`${KEY}:${userId}`, JSON.stringify(snapshot));
+      } catch {
+        /* ignore storage quota errors */
+      }
+      const { error } = await supabase
+        .from("studio_data")
+        .upsert({ user_id: userId, data: snapshot as never, updated_at: new Date().toISOString() });
+      if (error) {
+        console.error(error);
+        setSaveStatus("error");
+        return false;
+      }
+      dirtyRef.current = false;
+      setSaveStatus("saved");
+      return true;
+    },
+    [userId],
+  );
+
   useEffect(() => {
     let alive = true;
+    setLoadError(null);
+    setReady(false);
     (async () => {
-      const { data: row } = await supabase.from("studio_data").select("data").eq("user_id", userId).maybeSingle();
+      const { data: row, error } = await supabase
+        .from("studio_data")
+        .select("data")
+        .eq("user_id", userId)
+        .maybeSingle();
       if (!alive) return;
-      if (row?.data) setData(normalizeData(row.data as unknown as Partial<Data>));
-      else {
+      if (error) {
+        console.error(error);
+        setLoadError("Não foi possível carregar seus dados da nuvem. Verifique sua conexão e tente novamente.");
+        return;
+      }
+      if (row?.data) {
+        const normalized = normalizeData(row.data as unknown as Partial<Data>);
+        dirtyRef.current = false;
+        setDataState(normalized);
+        setSaveStatus("saved");
+      } else {
         // first login: bring over anything saved on this device
         let start = initial;
-        const raw = localStorage.getItem(KEY);
-        if (raw) try { start = normalizeData(JSON.parse(raw)); } catch { /* ignore */ }
-        setData(start);
-        await supabase.from("studio_data").insert({ user_id: userId, data: start as never });
+        const raw = localStorage.getItem(`${KEY}:${userId}`) ?? localStorage.getItem(KEY);
+        if (raw) {
+          try {
+            start = normalizeData(JSON.parse(raw));
+          } catch {
+            /* ignore */
+          }
+        }
+        dirtyRef.current = false;
+        setDataState(start);
+        const { error: insertError } = await supabase
+          .from("studio_data")
+          .insert({ user_id: userId, data: start as never });
+        if (!alive) return;
+        if (insertError) {
+          console.error(insertError);
+          setSaveStatus("error");
+        } else {
+          setSaveStatus("saved");
+        }
       }
       setReady(true);
     })();
-    return () => { alive = false; };
-  }, [userId]);
+    return () => {
+      alive = false;
+    };
+  }, [userId, reloadTick]);
+
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !dirtyRef.current) return;
     const t = setTimeout(() => {
-      supabase.from("studio_data").upsert({ user_id: userId, data: data as never, updated_at: new Date().toISOString() }).then(({ error }) => { if (error) console.error(error); });
+      void persistToCloud(data);
     }, 600);
     return () => clearTimeout(t);
-  }, [data, ready, userId]);
-  return { data, setData, ready, reset: () => setData(initial) };
+  }, [data, ready, persistToCloud]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current || saveStatus === "saving" || saveStatus === "error") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saveStatus]);
+
+  return {
+    data,
+    setData,
+    ready,
+    loadError,
+    saveStatus,
+    retryLoad: () => setReloadTick((n) => n + 1),
+    retrySave: () => void persistToCloud(latestDataRef.current),
+    reset: () => setData(initial),
+  };
 }
 
 export const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -542,7 +687,7 @@ export function availableMonths(d: Data): string[] {
 export function availableYears(d: Data): string[] {
   const set = new Set<string>();
   for (const ym of availableMonths(d)) set.add(ym.slice(0, 4));
-  if (set.size === 0) set.add(new Date().toISOString().slice(0, 4));
+  if (set.size === 0) set.add(todayLocal().slice(0, 4));
   return [...set].sort((a, b) => b.localeCompare(a));
 }
 
@@ -588,7 +733,7 @@ export function summary(d: Data) {
   });
   const payroll = team.reduce((a, t) => a + t.net, 0);
   const withdrawn = d.withdrawals.reduce((a, w) => a + w.amount, 0);
-  const ceiling = profit * d.safeRate;
+  const ceiling = Math.max(0, profit * d.safeRate);
   return {
     revenue,
     expenses,

@@ -70,12 +70,13 @@ export function PaymentMethodsManager({ data, setData, showStats = false }: Prop
 
   const usageFor = (name: string) => {
     const txs = data.transactions.filter((t) => t.payment === name);
+    const activeTxs = txs.filter((t) => t.status !== "Cancelado");
     const wds = data.withdrawals.filter((w) => w.payment === name);
-    const inc = txs.filter((t) => t.type === "Entrada").reduce((a, t) => a + t.amount, 0);
+    const inc = activeTxs.filter((t) => t.type === "Entrada").reduce((a, t) => a + t.amount, 0);
     const out =
-      txs.filter((t) => t.type === "Saída").reduce((a, t) => a + t.amount, 0) +
+      activeTxs.filter((t) => t.type === "Saída").reduce((a, t) => a + t.amount, 0) +
       wds.reduce((a, w) => a + w.amount, 0);
-    return { count: txs.length + wds.length, inc, out };
+    return { count: activeTxs.length + wds.length, inc, out };
   };
 
   const deletingUsage = deletingName ? usageFor(deletingName).count : 0;
