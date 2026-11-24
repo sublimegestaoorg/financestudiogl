@@ -4,6 +4,7 @@ import { CreditCard, Pencil, Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { toast } from "sonner";
+import { DashboardCharts } from "@/components/studio/charts";
 import {
   addStaff,
   addStockItem,
@@ -236,6 +237,7 @@ function Dashboard({ data }: { data: Data }) {
         ))}
         <p className="text-sm text-muted-foreground">Meta de serviços: R$ 12.000,00 — {pct(s.services / 12000)} atingido</p>
       </div>
+      <DashboardCharts data={data} />
     </>
   );
 }
